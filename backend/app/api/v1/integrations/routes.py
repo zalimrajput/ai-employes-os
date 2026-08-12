@@ -6,6 +6,7 @@ logger = logging.getLogger("app.api.v1.integrations")
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import RedirectResponse
+from pydantic import BaseModel
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -74,37 +75,67 @@ def integration_status(
         }
         for provider in OAUTH_PROVIDERS
     ]
-    statuses.extend(_key_provider_statuses(connected_map))
+    statuses.extend(
+        _key_provider_statuses(db, connected_map, me.organization_id)
+    )
     return statuses
 
 
-def _key_provider_statuses(connected_map: dict[str, bool] | None = None) -> list[dict]:
+def _key_provider_statuses(
+    db: Session,
+    connected_map: dict[str, bool] | None = None,
+    organization_id: str | None = None,
+) -> list[dict]:
     """Configured/connected flags for env-key providers (no network calls).
 
     The Connect button runs the live check via /integrations/check/{provider};
     a successful check persists the connected flag in the integrations table
     (see _persist_key_connection) so the badge survives page refreshes — the
     same source the OAuth providers use. ``connected_map`` is org -> provider ->
-    connected from that table.
+    connected from that table. WhatsApp may also be configured per-org (own
+    token + phone number ID stored in the org's integration row), which counts
+    as configured for that org even without platform-level env keys.
     """
     from app.core.config import settings as app_settings
     from app.integrations.cloud_storage import get_client as get_storage_client
 
     connected_map = connected_map or {}
+    org_has_whatsapp = False
+    whatsapp_phone_id: str | None = None
+    if organization_id:
+        wa_row = (
+            db.query(Integration)
+            .filter(
+                Integration.organization_id == organization_id,
+                Integration.provider == "whatsapp",
+                Integration.access_token.isnot(None),
+                Integration.access_token != "",
+            )
+            .first()
+        )
+        if wa_row is not None:
+            org_has_whatsapp = True
+            # The org's OWN number id — lets the UI show which number this
+            # workspace is connected to (each org stores its own).
+            whatsapp_phone_id = (wa_row.metadata_json or {}).get("phone_number_id")
 
     def entry(provider: str, configured: bool) -> dict:
         return {
             "provider": provider,
             "configured": configured,
-            # Only report connected while the env keys are still present.
+            # Only report connected while the credentials are still present.
             "connected": bool(configured and connected_map.get(provider, False)),
         }
 
+    whatsapp_entry = entry(
+        "whatsapp",
+        bool(app_settings.WHATSAPP_API_TOKEN and app_settings.WHATSAPP_PHONE_ID)
+        or org_has_whatsapp,
+    )
+    whatsapp_entry["phone_number_id"] = whatsapp_phone_id
+
     return [
-        entry(
-            "whatsapp",
-            bool(app_settings.WHATSAPP_API_TOKEN and app_settings.WHATSAPP_PHONE_ID),
-        ),
+        whatsapp_entry,
         entry("stripe", bool(app_settings.STRIPE_SECRET_KEY)),
         entry("r2", get_storage_client() is not None),
     ]
@@ -265,6 +296,82 @@ def _run_key_check(provider: str) -> dict:
         }
 
     raise HTTPException(status_code=404, detail=f"Unknown provider: {provider}")
+
+
+class WhatsAppCredentialsIn(BaseModel):
+    """Per-organization WhatsApp Cloud API credentials."""
+
+    api_token: str
+    phone_number_id: str
+
+
+@router.post("/integrations/whatsapp/credentials", tags=["Integrations"])
+# Protected endpoint: stores the ORGANIZATION'S OWN WhatsApp credentials
+# (encrypted in its integration row, with the phone number id in metadata so
+# the inbound webhook can route to the right tenant). The token is verified
+# live against Meta before anything is saved.
+def save_whatsapp_credentials(
+    body: WhatsAppCredentialsIn,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    me = require_org_member(db, current_user)
+    token = (body.api_token or "").strip()
+    pnid = (body.phone_number_id or "").strip()
+    if not token or not pnid:
+        raise HTTPException(
+            status_code=400,
+            detail="Both the WhatsApp API token and phone number ID are required",
+        )
+    import httpx
+
+    try:
+        resp = httpx.get(
+            f"https://graph.facebook.com/v21.0/{pnid}",
+            params={"access_token": token},
+            timeout=15,
+        )
+    except httpx.HTTPError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Could not reach Meta's Graph API: {exc.__class__.__name__}",
+        )
+    if resp.status_code != 200:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Meta rejected the token ({resp.status_code}): {resp.text[:200]}",
+        )
+
+    from app.utils.encryption import encrypt_value
+
+    row = (
+        db.query(Integration)
+        .filter(
+            Integration.organization_id == me.organization_id,
+            Integration.provider == "whatsapp",
+        )
+        .first()
+    )
+    if row is None:
+        row = Integration(
+            organization_id=me.organization_id,
+            provider="whatsapp",
+            connected=True,
+            access_token=encrypt_value(token),
+            metadata_json={"kind": "whatsapp", "phone_number_id": pnid},
+        )
+        db.add(row)
+    else:
+        row.connected = True
+        row.access_token = encrypt_value(token)
+        row.metadata_json = {"kind": "whatsapp", "phone_number_id": pnid}
+    db.commit()
+    return {
+        "provider": "whatsapp",
+        "configured": True,
+        "connected": True,
+        "detail": "WhatsApp connected with your own number",
+    }
 
 
 router.include_router(

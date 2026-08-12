@@ -203,8 +203,11 @@ def test_integration_status_returns_provider_rows(db, monkeypatch):
         by_provider = {r["provider"]: r for r in rows}
         for provider in (*REDIRECT_ATTRS, "whatsapp", "stripe", "r2"):
             assert provider in by_provider
-            # keys are provider/configured/connected only — never tokens
-            assert set(by_provider[provider]) == {"provider", "configured", "connected"}
+            keys = set(by_provider[provider])
+            # base keys always present; only whatsapp may add phone_number_id
+            # (the org's own number id, not a credential) — never tokens
+            assert {"provider", "configured", "connected"} <= keys
+            assert keys <= {"provider", "configured", "connected", "phone_number_id"}
     finally:
         app.dependency_overrides.clear()
         for stmt in (

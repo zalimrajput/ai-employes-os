@@ -211,7 +211,12 @@ export const api = {
   /** Protected — per-provider configured/connected state (no tokens). */
   fetchIntegrationStatus: () =>
     apiFetch<
-      { provider: string; configured: boolean; connected: boolean }[]
+      {
+        provider: string;
+        configured: boolean;
+        connected: boolean;
+        phone_number_id?: string | null;
+      }[]
     >("/api/v1/integrations/status"),
 
   /**
@@ -234,4 +239,22 @@ export const api = {
       connected: boolean;
       detail?: string;
     }>(`/api/v1/integrations/check/${provider}`),
+
+  /**
+   * Protected — stores the ORGANIZATION'S OWN WhatsApp Cloud API credentials
+   * (token + phone number ID). Verified live against Meta before saving.
+   */
+  saveWhatsappCredentials: (body: {
+    api_token: string;
+    phone_number_id: string;
+  }) =>
+    apiFetch<{
+      provider: string;
+      configured: boolean;
+      connected: boolean;
+      detail?: string;
+    }>("/api/v1/integrations/whatsapp/credentials", {
+      method: "POST",
+      body,
+    }),
 };

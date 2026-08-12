@@ -49,15 +49,10 @@ const OAUTH_INTEGRATIONS = [
   { provider: "xero", name: "Xero", desc: "Accounting & invoicing sync", emoji: "🧾" },
 ];
 
-/** Env-key-based providers — no OAuth round-trip; Connect verifies the key live. */
+/** Env-key-based providers — no OAuth round-trip; Connect verifies the key live.
+ *  WhatsApp is NOT here: each workspace stores its OWN token + phone number ID
+ *  (see the dedicated form in IntegrationsTab). */
 const KEY_INTEGRATIONS = [
-  {
-    provider: "whatsapp",
-    name: "WhatsApp Business",
-    desc: "Customer support on WhatsApp",
-    emoji: "💬",
-    keys: "WHATSAPP_API_TOKEN + WHATSAPP_PHONE_ID",
-  },
   {
     provider: "stripe",
     name: "Stripe",
@@ -125,7 +120,6 @@ export default function SettingsPage() {
       const frame = requestAnimationFrame(() => setTab("integrations"));
       return () => cancelAnimationFrame(frame);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const { data: members, isLoading: membersLoading } = useQuery({
@@ -635,6 +629,9 @@ function IntegrationsTab() {
   const queryClient = useQueryClient();
   const [connecting, setConnecting] = useState<string | null>(null);
   const [keyConnected, setKeyConnected] = useState<Record<string, boolean>>({});
+  const [waToken, setWaToken] = useState("");
+  const [waPhoneId, setWaPhoneId] = useState("");
+  const [waSaving, setWaSaving] = useState(false);
   const { data: statuses, isLoading } = useQuery({
     queryKey: ["integration-status"],
     queryFn: () => api.fetchIntegrationStatus(),
@@ -642,6 +639,45 @@ function IntegrationsTab() {
 
   const statusFor = (provider: string) =>
     (statuses ?? []).find((s) => s.provider === provider);
+
+  /** Save the workspace's OWN WhatsApp token + phone number ID (per-org). */
+  async function handleWhatsappSave(e: React.FormEvent) {
+    e.preventDefault();
+    const token = waToken.trim();
+    const phoneId = waPhoneId.trim();
+    // Always reset the fields immediately — each workspace enters its own
+    // credentials fresh, so stale/wrong input (or browser autofill) never
+    // lingers in the form between attempts.
+    setWaToken("");
+    setWaPhoneId("");
+    if (!token || !phoneId) {
+      return toast.error("Enter both the API token and the phone number ID");
+    }
+    // Meta phone number IDs are pure numbers (e.g. 123456789012345) — never
+    // an email address or a phone number in +1-format.
+    if (!/^\d+$/.test(phoneId)) {
+      return toast.error(
+        "Phone number ID must be the numeric ID from Meta Business Manager (digits only, e.g. 123456789012345) — not an email"
+      );
+    }
+    setWaSaving(true);
+    try {
+      const result = await api.saveWhatsappCredentials({
+        api_token: token,
+        phone_number_id: phoneId,
+      });
+      if (result.connected) {
+        toast.success("WhatsApp connected with your own number");
+      } else {
+        toast.error(result.detail ?? "Could not verify the connection.");
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not connect WhatsApp");
+    } finally {
+      setWaSaving(false);
+      queryClient.invalidateQueries({ queryKey: ["integration-status"] });
+    }
+  }
 
   async function handleConnect(provider: string) {
     setConnecting(provider);
@@ -725,6 +761,76 @@ function IntegrationsTab() {
               </div>
             );
           })}
+        </div>
+
+        <div className="rounded-xl border border-border-soft bg-card-soft/40 p-4">
+          <div className="flex items-center gap-3">
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-card text-xl">💬</span>
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-bold text-white">WhatsApp Business — your own number</p>
+              <p className="truncate text-xs text-slate-500">
+                Each workspace connects its own WhatsApp number — enter your Meta credentials below
+              </p>
+            </div>
+            {statusFor("whatsapp")?.connected ? (
+              <Badge variant="success">
+                Connected
+                {statusFor("whatsapp")?.phone_number_id
+                  ? ` · ${statusFor("whatsapp")?.phone_number_id}`
+                  : ""}
+              </Badge>
+            ) : statusFor("whatsapp")?.configured ? (
+              <Badge variant="secondary">Not connected</Badge>
+            ) : null}
+          </div>
+          {statusFor("whatsapp")?.connected && !waToken && !waPhoneId && (
+            <p className="mt-2 text-xs text-slate-500">
+              This workspace is connected to its own WhatsApp number. To switch numbers, enter the new
+              credentials below and click Update & re-verify.
+            </p>
+          )}
+          <form onSubmit={handleWhatsappSave} className="mt-3 grid gap-2 sm:grid-cols-2">
+            <div className="space-y-1.5">
+              <Label>WhatsApp API token</Label>
+              <Input
+                type="password"
+                autoComplete="new-password"
+                value={waToken}
+                onChange={(e) => setWaToken(e.target.value)}
+                placeholder="EAAG… starts with EAAG or EAA"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Phone number ID</Label>
+              <Input
+                autoComplete="off"
+                value={waPhoneId}
+                onChange={(e) => setWaPhoneId(e.target.value)}
+                placeholder="numeric only, e.g. 123456789012345"
+              />
+            </div>
+            <div className="sm:col-span-2 flex flex-wrap items-center gap-2">
+              <Button type="submit" size="sm" disabled={waSaving}>
+                {waSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plug className="h-3.5 w-3.5" />}
+                {statusFor("whatsapp")?.connected ? "Update & re-verify" : "Save & connect"}
+              </Button>
+              <p className="text-xs text-slate-600">
+                Your token is stored encrypted and used only for your workspace.
+              </p>
+            </div>
+            <details className="sm:col-span-2 rounded-xl border border-border-soft bg-card/40 px-3 py-2 text-xs text-slate-500">
+              <summary className="cursor-pointer font-semibold text-slate-400 transition-colors hover:text-slate-300">
+                📋 Where do I find these two values?
+              </summary>
+              <ol className="mt-2 list-decimal space-y-1 pl-4">
+                <li>Open <b>business.facebook.com</b> and select the company that owns the WhatsApp number.</li>
+                <li>Go to <b>WhatsApp → API Setup</b> (left menu).</li>
+                <li><b>Phone number ID</b> — under “Phone numbers”: a long number like <b>123456789012345</b>. It is never an email.</li>
+                <li><b>WhatsApp API token</b> — click <b>Generate token</b> (or “System user” → token). It starts with <b>EAAG…</b> / <b>EAA…</b> — never your email password.</li>
+                <li>Paste both here and click <b>Save & connect</b>.</li>
+              </ol>
+            </details>
+          </form>
         </div>
 
         <div>
