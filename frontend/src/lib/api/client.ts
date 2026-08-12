@@ -1,8 +1,11 @@
 import { supabase } from "@/lib/supabase/client";
 import type {
+  AIConversation,
+  AIMessage,
   Customer,
   CustomerCreate,
   DepartmentCreate,
+  ImagePart,
   Invoice,
   InvoiceCreate,
   Lead,
@@ -184,4 +187,51 @@ export const api = {
   // ── Analytics summary (live counts) ──────────────────────
   fetchAnalyticsSummary: () =>
     apiFetch<Record<string, number>>("/api/v1/analytics/summary"),
+
+  // ── AI Chat (real agent engine) ──────────────────────────
+  /** Protected — lists the caller's org AI conversations. */
+  fetchAIConversations: () => apiFetch<AIConversation[]>("/api/v1/ai-chat/conversations"),
+
+  /** Protected — creates an AI conversation in the caller's org. */
+  createAIConversation: (body: { ai_employee_id?: string; title?: string }) =>
+    apiFetch<AIConversation>("/api/v1/ai-chat/conversations", { method: "POST", body }),
+
+  /** Protected — lists the messages of one org-scoped conversation. */
+  fetchAIMessages: (conversationId: string) =>
+    apiFetch<AIMessage[]>(`/api/v1/ai-chat/conversations/${conversationId}/messages`),
+
+  /** Protected — sends a message (optionally with image attachments) and runs the AI agent. */
+  sendAIMessage: (body: {
+    conversation_id: string;
+    message?: string;
+    images?: ImagePart[];
+  }) => apiFetch<AIMessage>("/api/v1/ai-chat/messages", { method: "POST", body }),
+
+  // ── Integrations (OAuth connect flow) ─────────────────────
+  /** Protected — per-provider configured/connected state (no tokens). */
+  fetchIntegrationStatus: () =>
+    apiFetch<
+      { provider: string; configured: boolean; connected: boolean }[]
+    >("/api/v1/integrations/status"),
+
+  /**
+   * Protected — returns the provider authorization URL. Callers should
+   * `window.location.assign(url)` so the user lands on Google/Microsoft/Slack.
+   */
+  connectIntegration: (provider: string) =>
+    apiFetch<{ authorize_url: string }>(
+      `/api/v1/integrations/oauth/connect/${provider}`
+    ),
+
+  /**
+   * Protected — live connectivity check for env-key providers
+   * (whatsapp / stripe / r2). Read-only; returns the exact failure reason.
+   */
+  checkIntegration: (provider: string) =>
+    apiFetch<{
+      provider: string;
+      configured: boolean;
+      connected: boolean;
+      detail?: string;
+    }>(`/api/v1/integrations/check/${provider}`),
 };

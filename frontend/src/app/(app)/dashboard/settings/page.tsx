@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Building2,
@@ -27,6 +27,7 @@ import { Tabs } from "@/components/ui/tabs";
 import { Avatar } from "@/components/ui/avatar";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useSession } from "@/hooks/use-session";
+import { api } from "@/lib/api/client";
 import { addDepartment, fetchOrgDepartments, fetchOrgMembers, fetchOrgModules, fetchOrgRoles, inviteMember, removeDepartment, removeMember, updateMyOrgModule } from "@/services/admin";
 import { MODULE_BY_KEY, TOGGLEABLE_MODULES } from "@/lib/modules";
 import { ROLE_META } from "@/lib/roles";
@@ -34,22 +35,92 @@ import { cn } from "@/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
 
-const INTEGRATIONS = [
-  { name: "Gmail", desc: "Draft, send & summarize emails", emoji: "📧", connected: true },
-  { name: "Outlook", desc: "Microsoft 365 mail & calendar", emoji: "📅", connected: false },
-  { name: "WhatsApp Business", desc: "Customer support on WhatsApp", emoji: "💬", connected: true },
-  { name: "Google Calendar", desc: "Meetings & scheduling", emoji: "🗓️", connected: true },
-  { name: "Slack", desc: "Team notifications & approvals", emoji: "⚡", connected: false },
-  { name: "QuickBooks", desc: "Accounting & invoicing sync", emoji: "🧾", connected: false },
-  { name: "Stripe", desc: "Payments & billing", emoji: "💳", connected: true },
-  { name: "Google Drive", desc: "Document storage & OCR", emoji: "☁️", connected: false },
+/** OAuth providers the backend can connect (keys must match the API provider names). */
+const OAUTH_INTEGRATIONS = [
+  { provider: "gmail", name: "Gmail", desc: "Draft, send & summarize emails", emoji: "📧" },
+  { provider: "google-calendar", name: "Google Calendar", desc: "Meetings & scheduling", emoji: "🗓️" },
+  { provider: "google-drive", name: "Google Drive", desc: "Document storage & OCR", emoji: "☁️" },
+  { provider: "google-sheets", name: "Google Sheets", desc: "Spreadsheets & exports", emoji: "📊" },
+  { provider: "outlook", name: "Outlook", desc: "Microsoft mail & calendar", emoji: "📅" },
+  { provider: "microsoft365", name: "Microsoft 365", desc: "Calendar, mail & tasks", emoji: "🪟" },
+  { provider: "onedrive", name: "OneDrive / Excel", desc: "Cloud files & workbooks", emoji: "📁" },
+  { provider: "slack", name: "Slack", desc: "Team notifications & approvals", emoji: "⚡" },
+  { provider: "zoho", name: "Zoho CRM", desc: "Leads & pipeline sync", emoji: "🧲" },
+  { provider: "xero", name: "Xero", desc: "Accounting & invoicing sync", emoji: "🧾" },
 ];
+
+/** Env-key-based providers — no OAuth round-trip; Connect verifies the key live. */
+const KEY_INTEGRATIONS = [
+  {
+    provider: "whatsapp",
+    name: "WhatsApp Business",
+    desc: "Customer support on WhatsApp",
+    emoji: "💬",
+    keys: "WHATSAPP_API_TOKEN + WHATSAPP_PHONE_ID",
+  },
+  {
+    provider: "stripe",
+    name: "Stripe",
+    desc: "Payments & billing",
+    emoji: "💳",
+    keys: "STRIPE_SECRET_KEY",
+  },
+  {
+    provider: "r2",
+    name: "Cloudflare R2 / S3",
+    desc: "Cloud document storage",
+    emoji: "☁️",
+    keys: "STORAGE_PROVIDER + S3_ENDPOINT_URL + S3_ACCESS_KEY_ID + S3_SECRET_ACCESS_KEY + S3_BUCKET",
+  },
+];
+
+const PROVIDER_LABEL: Record<string, string> = Object.fromEntries(
+  OAUTH_INTEGRATIONS.map((i) => [i.provider, i.name])
+);
+
+/** Turn common provider error text into an actionable hint. */
+function oauthErrorHint(detail: string, provider: string): string {
+  const d = detail.toLowerCase();
+  if (provider === "xero" && d.includes("invalid_scope")) {
+    return "Enable the requested scopes (accounting.transactions, offline_access) in your Xero app at developer.xero.com, or set XERO_SCOPES in the backend .env to match what the app allows.";
+  }
+  if (provider === "zoho" && (d.includes("invalid_client") || d.includes("region"))) {
+    return "Zoho OAuth clients are bound to a data center — set ZOHO_DATA_CENTER (com | eu | in | com.au | jp | sa) in the backend .env to match your Zoho account.";
+  }
+  if (provider.startsWith("google") && d.includes("access_denied")) {
+    return "Google blocked this account. If the app is in Testing mode, add this email under Google Cloud Console → OAuth consent screen → Test users. If it's In production but unverified, click Advanced → Go to AI Employee OS (unsafe) on the warning page.";
+  }
+  return "Check the provider console and backend logs.";
+}
 
 export default function SettingsPage() {
   const { data: session } = useSession();
   const queryClient = useQueryClient();
   const [tab, setTab] = useState("users");
   const [apiKey] = useState("sk-ai-os-••••••••••••••••••••");
+
+  // After an OAuth round-trip the backend redirects here with
+  // ?tab=integrations&status=connected|error&provider=<name>.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const status = params.get("status");
+    const provider = params.get("provider") ?? "";
+    const errorDesc = params.get("error_description") ?? "";
+    if (params.get("tab") === "integrations" || status) setTab("integrations");
+    if (status === "connected") {
+      toast.success(`${PROVIDER_LABEL[provider] ?? provider} connected — your AI employees can use it now`);
+    } else if (status === "error") {
+      toast.error(
+        `Could not connect ${PROVIDER_LABEL[provider] ?? provider}. ${oauthErrorHint(errorDesc, provider)}`
+      );
+    }
+    if (status || params.get("tab")) {
+      const url = new URL(window.location.href);
+      url.search = "";
+      window.history.replaceState({}, "", url.pathname);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const { data: members, isLoading: membersLoading } = useQuery({
     queryKey: ["org-members"],
@@ -288,30 +359,7 @@ export default function SettingsPage() {
           </>
         )}
 
-        {tab === "integrations" && (
-          <>
-            <CardHeader>
-              <CardTitle>Integrations</CardTitle>
-              <CardDescription>Connect the tools your AI employees operate.</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="grid gap-3 sm:grid-cols-2">
-                {INTEGRATIONS.map((i) => (
-                  <div key={i.name} className="flex items-center gap-3 rounded-xl border border-border-soft bg-card-soft/40 p-4">
-                    <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-card text-xl">{i.emoji}</span>
-                    <div className="min-w-0 flex-1">
-                      <p className="text-sm font-bold text-white">{i.name}</p>
-                      <p className="truncate text-xs text-slate-500">{i.desc}</p>
-                    </div>
-                    <Badge variant={i.connected ? "success" : "secondary"}>
-                      {i.connected ? "Connected" : "Connect"}
-                    </Badge>
-                  </div>
-                ))}
-              </div>
-            </CardContent>
-          </>
-        )}
+        {tab === "integrations" && <IntegrationsTab />}
       </Card>
     </div>
   );
@@ -570,6 +618,154 @@ function UsersTab({
               </Button>
             </div>
           ))
+        )}
+      </CardContent>
+    </>
+  );
+}
+
+// ── Integrations tab (live OAuth connect + env-key checks) ─
+function IntegrationsTab() {
+  const queryClient = useQueryClient();
+  const [connecting, setConnecting] = useState<string | null>(null);
+  const [keyConnected, setKeyConnected] = useState<Record<string, boolean>>({});
+  const { data: statuses, isLoading } = useQuery({
+    queryKey: ["integration-status"],
+    queryFn: () => api.fetchIntegrationStatus(),
+  });
+
+  const statusFor = (provider: string) =>
+    (statuses ?? []).find((s) => s.provider === provider);
+
+  async function handleConnect(provider: string) {
+    setConnecting(provider);
+    try {
+      const { authorize_url } = await api.connectIntegration(provider);
+      window.location.assign(authorize_url); // leaves the page to the provider
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not start OAuth");
+      setConnecting(null);
+    }
+  }
+
+  /** Env-key providers: run a live connectivity test with the configured key.
+   *  The backend persists the result, so on success the badge stays Connected
+   *  after a page refresh (same as the OAuth providers). */
+  async function handleCheckKey(provider: string, name: string) {
+    setConnecting(provider);
+    try {
+      const result = await api.checkIntegration(provider);
+      if (result.connected) {
+        setKeyConnected((m) => ({ ...m, [provider]: true }));
+        toast.success(`${name} connected — your AI employees can use it now`);
+      } else {
+        // Clear any earlier optimistic success so the persisted (false) state
+        // from the backend is what the badge shows — never a stale Connected.
+        setKeyConnected((m) => ({ ...m, [provider]: false }));
+        toast.error(`${name}: ${result.detail ?? "Could not verify the connection."}`);
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : `Could not verify ${name}`);
+    } finally {
+      setConnecting(null);
+      // Refetch so the persisted connected flag (stored by the backend in the
+      // integrations table) is what the badge shows after a refresh.
+      queryClient.invalidateQueries({ queryKey: ["integration-status"] });
+    }
+  }
+
+  return (
+    <>
+      <CardHeader>
+        <CardTitle>Integrations</CardTitle>
+        <CardDescription>
+          Connect the tools your AI employees operate. After you approve in the provider page,
+          you&apos;ll land back here automatically.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-5">
+        <div className="grid gap-3 sm:grid-cols-2">
+          {OAUTH_INTEGRATIONS.map((i) => {
+            const st = statusFor(i.provider);
+            const configured = st?.configured ?? false;
+            const connected = st?.connected ?? false;
+            return (
+              <div key={i.provider} className="flex items-center gap-3 rounded-xl border border-border-soft bg-card-soft/40 p-4">
+                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-card text-xl">{i.emoji}</span>
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-bold text-white">{i.name}</p>
+                  <p className="truncate text-xs text-slate-500">{i.desc}</p>
+                </div>
+                {connected ? (
+                  <Badge variant="success">Connected</Badge>
+                ) : configured ? (
+                  <Button
+                    size="sm"
+                    disabled={connecting === i.provider}
+                    onClick={() => handleConnect(i.provider)}
+                  >
+                    {connecting === i.provider ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <Plug className="h-3.5 w-3.5" />
+                    )}
+                    Connect
+                  </Button>
+                ) : (
+                  <Badge variant="secondary" title="Add the client ID/secret to the backend .env">
+                    Not configured
+                  </Badge>
+                )}
+              </div>
+            );
+          })}
+        </div>
+
+        <div>
+          <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-500">API-key integrations</p>
+          <div className="grid gap-3 sm:grid-cols-2">
+            {KEY_INTEGRATIONS.map((i) => {
+              const st = statusFor(i.provider);
+              const configured = st?.configured ?? false;
+              // Persisted flag from the backend (survives refresh), with the
+              // just-run check as an immediate overlay while we refetch.
+              const connected = keyConnected[i.provider] ?? st?.connected ?? false;
+              return (
+                <div key={i.provider} className="flex items-center gap-3 rounded-xl border border-border-soft bg-card-soft/40 p-4">
+                  <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-card text-xl">{i.emoji}</span>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-bold text-white">{i.name}</p>
+                    <p className="truncate text-xs text-slate-500">{i.desc}</p>
+                    <p className="truncate text-[10px] text-slate-600" title={i.keys}>Keys: {i.keys}</p>
+                  </div>
+                  {connected ? (
+                    <Badge variant="success">Connected</Badge>
+                  ) : configured ? (
+                    <Button
+                      size="sm"
+                      disabled={connecting === i.provider}
+                      onClick={() => handleCheckKey(i.provider, i.name)}
+                    >
+                      {connecting === i.provider ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <Plug className="h-3.5 w-3.5" />
+                      )}
+                      Connect
+                    </Button>
+                  ) : (
+                    <Badge variant="secondary" title={i.keys}>
+                      Not configured
+                    </Badge>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {isLoading && (
+          <p className="text-center text-xs text-slate-500">Loading connection state…</p>
         )}
       </CardContent>
     </>

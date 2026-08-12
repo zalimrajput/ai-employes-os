@@ -2,14 +2,15 @@
 
 import { useEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
-import { Bot, Paperclip, Send, Sparkles } from "lucide-react";
+import { Bot, ImagePlus, Paperclip, Send, Sparkles, X } from "lucide-react";
 import { Avatar } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import type { AIMessage } from "@/lib/api/types";
+import type { AIMessage, ImagePart } from "@/lib/api/types";
 import { cn } from "@/lib/utils";
 import { useSession } from "@/hooks/use-session";
-import { sendMessage } from "@/services/data";
+import { api } from "@/lib/api/client";
+import { toast } from "sonner";
 
 function TypingDots() {
   return (
@@ -48,7 +49,15 @@ function MessageBody({ text }: { text: string }) {
   );
 }
 
-const REPLIES = [
+/**
+ * Demo-only canned replies. Real conversations (non `demo-` ids) go through the
+ * backend AI engine; these exist solely so the pre-seeded demo rows in a fresh
+ * workspace still feel interactive.
+ */
+type Attachment = { id: string; name: string; mime: string; url: string };
+type LocalMessage = AIMessage & { attachments?: string[] };
+
+const DEMO_REPLIES = [
   "Done! I've drafted it and queued it for review. Want me to send it now?",
   "I found 3 related records in the CRM. Here's what I prepared — approve and I'll execute.",
   "Completed ✅ — updated the pipeline and scheduled the follow-up for Friday at 3 PM.",
@@ -66,37 +75,86 @@ export function ChatInterface({
   initialMessages: AIMessage[];
 }) {
   const { data: session } = useSession();
-  const [messages, setMessages] = useState<AIMessage[]>(initialMessages);
+  const [messages, setMessages] = useState<LocalMessage[]>(initialMessages);
   const [input, setInput] = useState("");
   const [thinking, setThinking] = useState(false);
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
   }, [messages, thinking]);
 
+  function handleFiles(files: FileList | null) {
+    if (!files) return;
+    for (const file of Array.from(files)) {
+      if (!["image/png", "image/jpeg", "image/webp", "image/gif"].includes(file.type)) {
+        toast.error(`Skipped ${file.name} — only PNG, JPEG, WebP or GIF images are supported`);
+        continue;
+      }
+      if (file.size > 5 * 1024 * 1024) {
+        toast.error(`Skipped ${file.name} — images must be 5 MB or smaller`);
+        continue;
+      }
+      const reader = new FileReader();
+      reader.onload = () => {
+        const url = String(reader.result ?? "");
+        if (!url) return;
+        setAttachments((prev) =>
+          prev.length >= 4 ? prev : [...prev, { id: `${Date.now()}-${Math.random()}`, name: file.name, mime: file.type, url }]
+        );
+      };
+      reader.readAsDataURL(file);
+    }
+  }
+
   async function handleSend() {
     const text = input.trim();
-    if (!text || thinking) return;
+    if ((!text && attachments.length === 0) || thinking) return;
+    const images: ImagePart[] = attachments.map((a) => ({
+      type: "image_url",
+      image_url: { url: a.url },
+    }));
+    const localAttachments = attachments.map((a) => a.url);
     setInput("");
+    setAttachments([]);
     setThinking(true);
 
-    const userMsg: AIMessage = {
+    const userMsg: LocalMessage = {
       id: `local-${Date.now()}`,
       conversation_id: conversationId,
       role: "user",
-      message: text,
+      message: text || "Describe the attached image(s).",
+      attachments: localAttachments,
     };
     setMessages((m) => [...m, userMsg]);
 
-    // persist to supabase (best-effort)
-    const isDemo = conversationId.startsWith("demo-");
-    if (!isDemo) {
-      await sendMessage(conversationId, "user", text).catch(() => null);
+    const isDemo =
+      conversationId.startsWith("demo-") &&
+      process.env.NEXT_PUBLIC_ENABLE_DEMO === "true";
+
+    let reply: string;
+    if (isDemo) {
+      // Demo rows are UI-only — keep them responsive without a backend.
+      reply = DEMO_REPLIES[Math.floor(Math.random() * DEMO_REPLIES.length)];
+    } else {
+      try {
+        // Real conversation: run the AI agent through the backend, which also
+        // persists the user message + assistant reply.
+        const result = await api.sendAIMessage({
+          conversation_id: conversationId,
+          message: text,
+          images,
+        });
+        reply =
+          (result?.message ?? "").trim() ||
+          "I couldn't generate a response — please try again.";
+      } catch (err) {
+        reply = `⚠️ ${(err as Error).message ?? "Something went wrong."}`;
+      }
     }
 
-    // simulate streaming reply
-    const reply = REPLIES[Math.floor(Math.random() * REPLIES.length)];
     const streamed: AIMessage = {
       id: `local-${Date.now() + 1}`,
       conversation_id: conversationId,
@@ -111,9 +169,6 @@ export function ChatInterface({
       setMessages((m) =>
         m.map((msg) => (msg.id === streamed.id ? { ...msg, message: reply.slice(0, i + 1) } : msg))
       );
-    }
-    if (!isDemo) {
-      await sendMessage(conversationId, "assistant", reply).catch(() => null);
     }
     setThinking(false);
   }
@@ -151,6 +206,18 @@ export function ChatInterface({
                     <Sparkles className="h-3 w-3" /> {employeeName}
                   </p>
                 )}
+                {msg.attachments && msg.attachments.length > 0 && (
+                  <div className="mb-2 flex flex-wrap gap-2">
+                    {msg.attachments.map((src, i) => (
+                      <img
+                        key={i}
+                        src={src}
+                        alt={`attachment ${i + 1}`}
+                        className="h-24 w-24 rounded-lg border border-white/20 object-cover"
+                      />
+                    ))}
+                  </div>
+                )}
                 {msg.message ? <MessageBody text={msg.message} /> : <TypingDots />}
               </div>
             </motion.div>
@@ -159,6 +226,38 @@ export function ChatInterface({
       </div>
 
       <div className="border-t border-border-soft bg-card/40 p-3 md:p-4">
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/png,image/jpeg,image/webp,image/gif"
+          multiple
+          hidden
+          onChange={(e) => {
+            handleFiles(e.target.files);
+            e.target.value = "";
+          }}
+        />
+        {attachments.length > 0 && (
+          <div className="mb-2 flex flex-wrap gap-2">
+            {attachments.map((a) => (
+              <div key={a.id} className="group relative">
+                <img
+                  src={a.url}
+                  alt={a.name}
+                  className="h-14 w-14 rounded-lg border border-border-soft object-cover"
+                />
+                <button
+                  type="button"
+                  onClick={() => setAttachments((prev) => prev.filter((x) => x.id !== a.id))}
+                  className="absolute -right-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-danger text-white shadow"
+                  aria-label={`Remove ${a.name}`}
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
         <div className="relative">
           <Textarea
             value={input}
@@ -170,13 +269,28 @@ export function ChatInterface({
               }
             }}
             placeholder={`Message ${employeeName}…`}
-            className="min-h-[56px] max-h-36 resize-none pr-20 py-3.5"
+            className="min-h-[56px] max-h-36 resize-none pr-24 py-3.5"
           />
           <div className="absolute bottom-2.5 right-2.5 flex items-center gap-1.5">
-            <Button variant="ghost" size="iconSm" aria-label="Attach">
-              <Paperclip className="h-4 w-4" />
+            <Button
+              variant="ghost"
+              size="iconSm"
+              aria-label="Attach images"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={attachments.length >= 4}
+            >
+              {attachments.length >= 4 ? (
+                <ImagePlus className="h-4 w-4 opacity-40" />
+              ) : (
+                <Paperclip className="h-4 w-4" />
+              )}
             </Button>
-            <Button size="iconSm" onClick={handleSend} disabled={!input.trim() || thinking} aria-label="Send">
+            <Button
+              size="iconSm"
+              onClick={handleSend}
+              disabled={(!input.trim() && attachments.length === 0) || thinking}
+              aria-label="Send"
+            >
               <Send className="h-4 w-4" />
             </Button>
           </div>

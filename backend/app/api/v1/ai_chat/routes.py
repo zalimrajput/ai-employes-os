@@ -1,10 +1,16 @@
 from datetime import datetime
+from typing import Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
+from app.ai.chat_access import (
+    can_see_all_chats,
+    user_can_access_conversation,
+    allowed_agent_roles,
+)
 from app.ai.guardrails import is_flagged, refuse_reply, sanitize_input
 from app.ai.orchestrator import execute_turn
 from app.ai.memory import remember
@@ -27,10 +33,45 @@ class ConversationCreate(BaseModel):
     title: str | None = None
 
 
+class ImageUrlInput(BaseModel):
+    url: str
+
+
+class ImageInput(BaseModel):
+    """OpenAI-style image part; url must be a ``data:image/...;base64,...`` URI."""
+
+    type: Literal["image_url"] = "image_url"
+    image_url: ImageUrlInput
+
+
+_MAX_IMAGES = 4
+_MAX_IMAGE_BYTES = 5 * 1024 * 1024
+_ALLOWED_IMAGE_MIMES = {"image/png", "image/jpeg", "image/webp", "image/gif"}
+
+
+def _validate_images(images: list[ImageInput]) -> list[dict]:
+    """Validate image attachments and return OpenAI-style image_url parts."""
+    if len(images) > _MAX_IMAGES:
+        raise HTTPException(status_code=422, detail=f"At most {_MAX_IMAGES} images per message")
+    parts: list[dict] = []
+    for img in images:
+        url = img.image_url.url
+        if not url.startswith("data:image/") or "," not in url:
+            raise HTTPException(status_code=422, detail="Image must be a data:image URI")
+        mime = url[5:].split(";")[0].strip().lower()
+        if mime not in _ALLOWED_IMAGE_MIMES:
+            raise HTTPException(status_code=422, detail=f"Unsupported image type: {mime}")
+        if len(url.split(",", 1)[1]) * 3 // 4 > _MAX_IMAGE_BYTES:
+            raise HTTPException(status_code=422, detail="Image too large (max 5 MB)")
+        parts.append({"type": "image_url", "image_url": {"url": url}})
+    return parts
+
+
 class MessageCreate(BaseModel):
     conversation_id: UUID
     content: str | None = None
     message: str | None = None
+    images: list[ImageInput] = []
 
     def text(self) -> str:
         return self.content or self.message or ""
@@ -41,6 +82,8 @@ class ConversationOut(BaseModel):
     ai_employee_id: UUID | None
     title: str | None
     status: str | None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
 
     model_config = {"from_attributes": True}
 
@@ -68,12 +111,25 @@ def list_conversations(
     current_user: dict = Depends(get_current_user),
 ):
     me = require_org_member(db, current_user)
-    return (
+    # Department isolation: users only see conversations they own or that are
+    # bound to their department's AI employee. Admins see all org chats.
+    conversations = (
         db.query(AIConversation)
         .filter(AIConversation.organization_id == me.organization_id)
         .order_by(AIConversation.created_at.desc())
         .all()
     )
+    is_admin = can_see_all_chats(db, me)
+    if is_admin:
+        return conversations
+    allowed = allowed_agent_roles(db, me)
+    return [
+        c
+        for c in conversations
+        if user_can_access_conversation(
+            conversation=c, is_owner=(c.user_id == me.id), is_admin=False, allowed_roles=allowed
+        )
+    ]
 
 
 @router.post("/conversations", response_model=ConversationOut, status_code=201)
@@ -118,6 +174,13 @@ def list_messages(
     ).first()
     if conversation is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
+    if not user_can_access_conversation(
+        conversation=conversation,
+        is_owner=(conversation.user_id == me.id),
+        is_admin=can_see_all_chats(db, me),
+        allowed_roles=allowed_agent_roles(db, me),
+    ):
+        raise HTTPException(status_code=403, detail="You don't have access to this conversation")
     return (
         db.query(AIMessage)
         .filter(AIMessage.conversation_id == conversation_id)
@@ -140,17 +203,24 @@ def send_message(
     ).first()
     if conversation is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
+    if not user_can_access_conversation(
+        conversation=conversation,
+        is_owner=(conversation.user_id == me.id),
+        is_admin=can_see_all_chats(db, me),
+        allowed_roles=allowed_agent_roles(db, me),
+    ):
+        raise HTTPException(status_code=403, detail="You don't have access to this conversation")
 
+    image_parts = _validate_images(data.images)
     text = sanitize_input(data.text())
-    if text is None:
+    if text is None and not image_parts:
         raise HTTPException(status_code=422, detail="Message must be 1-16000 chars")
+    # Allow an images-only message ("what does this screenshot show?").
+    if text is None:
+        text = "Describe the attached image(s)."
 
-    employee = None
-    if conversation.ai_employee_id is not None:
-        employee = db.query(AIEmployee).filter(
-            AIEmployee.id == conversation.ai_employee_id,
-            AIEmployee.organization_id == me.organization_id,
-        ).first()
+    # The conversation already joined-loads its AI employee.
+    employee = conversation.ai_employee
 
     user_message = AIMessage(
         organization_id=me.organization_id,
@@ -178,6 +248,7 @@ def send_message(
             text,
             employee=employee,
             history_messages=history,
+            images=image_parts,
         )
         if employee is not None:
             remember(
@@ -202,12 +273,8 @@ def _complete_turn(db, me, conversation, text, *, source: str = "text"):
     Mirrors the send_message body so voice and text messages follow the exact
     same orchestration path; only the user message's origin marker differs.
     """
-    employee = None
-    if conversation.ai_employee_id is not None:
-        employee = db.query(AIEmployee).filter(
-            AIEmployee.id == conversation.ai_employee_id,
-            AIEmployee.organization_id == me.organization_id,
-        ).first()
+    # The conversation already joined-loads its AI employee.
+    employee = conversation.ai_employee
 
     user_message = AIMessage(
         organization_id=me.organization_id,
@@ -270,6 +337,13 @@ def send_voice_message(
     ).first()
     if conversation is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
+    if not user_can_access_conversation(
+        conversation=conversation,
+        is_owner=(conversation.user_id == me.id),
+        is_admin=can_see_all_chats(db, me),
+        allowed_roles=allowed_agent_roles(db, me),
+    ):
+        raise HTTPException(status_code=403, detail="You don't have access to this conversation")
 
     audio_bytes = audio.file.read() if audio else b""
     filename = (audio.filename or "voice-recording.webm").rsplit("/", 1)[-1]
@@ -324,14 +398,16 @@ def stream_conversation(
     ).first()
     if conversation is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
+    if not user_can_access_conversation(
+        conversation=conversation,
+        is_owner=(conversation.user_id == me.id),
+        is_admin=can_see_all_chats(db, me),
+        allowed_roles=allowed_agent_roles(db, me),
+    ):
+        raise HTTPException(status_code=403, detail="You don't have access to this conversation")
     from fastapi.responses import StreamingResponse
 
-    employee = None
-    if conversation.ai_employee_id is not None:
-        employee = db.query(AIEmployee).filter(
-            AIEmployee.id == conversation.ai_employee_id,
-            AIEmployee.organization_id == me.organization_id,
-        ).first()
+    employee = conversation.ai_employee
 
     last_message = (
         db.query(AIMessage)

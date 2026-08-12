@@ -1,34 +1,60 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
-import { Bot, MessageSquare, Plus } from "lucide-react";
+import { Suspense, useState } from "react";
+import { Bot, MessageSquare, Plus, Sparkles } from "lucide-react";
+import { useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ChatInterface } from "@/components/ai/chat-interface";
 import { fetchAIEmployees, fetchConversations, fetchMessages, createConversation, DEMO_MESSAGES } from "@/services/data";
+import { employeeForAgent, agentDisplayName, agentForRoles } from "@/lib/agents";
 import { cn, timeAgo } from "@/lib/utils";
 import { useSession } from "@/hooks/use-session";
 import { toast } from "sonner";
 
+// useSearchParams must be rendered inside a <Suspense> boundary for static
+// prerendering — this component keeps the rest of the page intact.
 export default function ChatPage() {
+  return (
+    <Suspense fallback={<div className="flex h-full items-center justify-center text-sm text-slate-500">Loading chat…</div>}>
+      <ChatPageInner />
+    </Suspense>
+  );
+}
+
+function ChatPageInner() {
   const queryClient = useQueryClient();
   const { data: session } = useSession();
   const { data: convData, isLoading } = useQuery({ queryKey: ["conversations"], queryFn: fetchConversations });
   const { data: empData } = useQuery({ queryKey: ["ai-employees"], queryFn: fetchAIEmployees });
+  const searchParams = useSearchParams();
+  const agentParam = searchParams.get("agent");
+  const employeeParam = searchParams.get("employee");
   const [activeId, setActiveId] = useState<string | null>(null);
+  // No ?agent= / ?employee= → bind new conversations to the agent of the
+  // logged-in user's own role (Sales Executive → AI Sales Assistant), not the
+  // first AI employee.
+  const defaultAgent = agentForRoles(session?.user?.roles);
 
   const createMutation = useMutation({
     mutationFn: async () => {
       const user = session?.user;
-      const firstEmp = employees[0];
-      if (!user || !user.orgId || !firstEmp) {
+      // Bind the new conversation to the agent/employee requested by the
+      // dashboard (?agent=sales → AI Sales Assistant, or ?employee=<id>);
+      // fall back to the first employee.
+      const targetEmp =
+        employeeForAgent(employees, agentParam) ??
+        (employeeParam ? employees.find((e) => e.id === employeeParam) : undefined) ??
+        employeeForAgent(employees, defaultAgent) ??
+        employees[0];
+      if (!user || !user.orgId || !targetEmp) {
         throw new Error("Create a workspace and deploy an AI employee first.");
       }
       const conv = await createConversation({
         organization_id: user.orgId,
         user_id: user.id,
-        ai_employee_id: firstEmp.id,
+        ai_employee_id: targetEmp.id,
         title: "New conversation",
       });
       if (!conv) throw new Error("Could not create conversation in the database.");
@@ -49,6 +75,13 @@ export default function ChatPage() {
   const employees = empData?.source === "db" || empData?.source === "demo" ? empData.items : [];
   const selected = conversations.find((c) => c.id === activeId) ?? conversations[0];
   const selectedEmp = employees.find((e) => e.id === selected?.ai_employee_id);
+  // Agent requested by the landing dashboard (e.g. ?agent=sales), if any.
+  const landingEmp =
+    employeeForAgent(employees, agentParam) ??
+    (employeeParam ? employees.find((e) => e.id === employeeParam) : undefined) ??
+    employeeForAgent(employees, defaultAgent);
+  const landingAgentName =
+    landingEmp?.name ?? agentDisplayName(agentParam) ?? agentDisplayName(defaultAgent) ?? undefined;
 
   const { data: msgData } = useQuery({
     queryKey: ["messages", selected?.id],
@@ -56,8 +89,19 @@ export default function ChatPage() {
     enabled: !!selected,
   });
 
+  // Demo threads show curated rows; real conversations use their own messages
+  // and must never fall back to fake demo content, even on error.
+  const isDemoThread = selected?.id.startsWith("demo-") ?? false;
   const messages =
-    msgData?.source === "db" || msgData?.source === "demo" ? msgData.items : DEMO_MESSAGES;
+    msgData?.source === "db"
+      ? msgData.items
+      : msgData?.source === "demo"
+        ? isDemoThread
+          ? msgData.items
+          : []
+        : isDemoThread
+          ? DEMO_MESSAGES
+          : [];
 
   function handleNewChat() {
     createMutation.mutate();
@@ -128,6 +172,11 @@ export default function ChatPage() {
               <p className="mt-1 max-w-sm text-sm text-slate-400">
                 Delegate emails, quotations, CRM updates, reports and more to your AI employees.
               </p>
+              {landingAgentName && (
+                <p className="mt-3 inline-flex items-center gap-1.5 rounded-full border border-primary/30 bg-primary/10 px-3 py-1 text-xs font-semibold text-primary-soft">
+                  <Sparkles className="h-3 w-3" /> Talking to {landingEmp?.name ?? landingAgentName}
+                </p>
+              )}
             </div>
             <Button onClick={handleNewChat}><Plus className="h-4 w-4" /> New conversation</Button>
           </div>

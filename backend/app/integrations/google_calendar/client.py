@@ -8,7 +8,7 @@ persists the new token and retries once. The exception contract
 the Gmail client so callers can handle both integrations the same way.
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 
 import httpx
 
@@ -152,11 +152,13 @@ class GoogleCalendarClient:
 
     def list_upcoming_events(self, max_results: int = 10) -> list[dict]:
         """Return the next upcoming events on the primary calendar."""
+        # "now" is rejected by the API (400 badRequest) — send a real ISO
+        # timestamp so the call only returns upcoming events.
         params = {
             "maxResults": int(max_results),
             "singleEvents": "true",
             "orderBy": "startTime",
-            "timeMin": "now",
+            "timeMin": datetime.now(timezone.utc).isoformat(),
         }
         resp = self._request("GET", GOOGLE_CAL_EVENTS_URL, params=params)
         if resp.status_code >= 300:

@@ -21,15 +21,21 @@ logger = logging.getLogger("app.integrations.whatsapp.service")
 def resolve_organization_id(db, phone_number_id: str) -> str | None:
     """Return the organization id that owns ``phone_number_id``.
 
-    Scans connected ``whatsapp`` integration rows; a given phone number maps
-    to exactly one tenant, which keeps inbound events org-scoped.
+    Scans connected ``whatsapp`` integration rows whose owning organization
+    still exists (inner join drops orphaned rows left behind by deleted
+    orgs, so stale data can never hijack webhook routing). A given phone
+    number maps to exactly one tenant; the oldest match wins deterministically.
     """
+    from app.models.organization import Organization
+
     rows = (
         db.query(Integration)
+        .join(Organization, Organization.id == Integration.organization_id)
         .filter(
             Integration.provider == "whatsapp",
             Integration.connected.is_(True),
         )
+        .order_by(Integration.created_at.asc(), Integration.id.asc())
         .all()
     )
     wanted = str(phone_number_id)

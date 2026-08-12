@@ -18,6 +18,15 @@ import type {
  * the UI is always alive, flagged via `source: "demo"`.
  */
 
+/**
+ * Demo mode is opt-in via NEXT_PUBLIC_ENABLE_DEMO=true (dev/preview only).
+ * In production, empty workspaces return empty lists instead of curated fake
+ * rows so real customers never see demo data.
+ */
+export function isDemoEnabled(): boolean {
+  return process.env.NEXT_PUBLIC_ENABLE_DEMO === "true";
+}
+
 async function getCurrentOrgId(): Promise<string | null> {
   const {
     data: { user },
@@ -43,7 +52,9 @@ export async function fetchAIEmployees(): Promise<
   if (error) return { source: "error", error: error.message };
   if (data && data.length > 0) return { source: "db", items: data as AIEmployee[] };
 
-  return { source: "demo", items: DEMO_EMPLOYEES };
+  return isDemoEnabled()
+    ? { source: "demo", items: DEMO_EMPLOYEES }
+    : { source: "db", items: [] };
 }
 
 // ── Tasks ─────────────────────────────────────────────────
@@ -53,7 +64,9 @@ export async function fetchTasks(): Promise<
   try {
     const items = await api.fetchTasks();
     if (items.length > 0) return { source: "db", items };
-    return { source: "demo", items: DEMO_TASKS };
+    return isDemoEnabled()
+      ? { source: "demo", items: DEMO_TASKS }
+      : { source: "db", items: [] };
   } catch (err) {
     const message = (err as Error).message ?? "";
     // Only fall back to direct Supabase when the backend is unreachable —
@@ -67,7 +80,9 @@ export async function fetchTasks(): Promise<
     const { data, error } = await query;
     if (error) return { source: "error", error: error.message };
     if (data && data.length > 0) return { source: "db", items: data as Task[] };
-    return { source: "demo", items: DEMO_TASKS };
+    return isDemoEnabled()
+      ? { source: "demo", items: DEMO_TASKS }
+      : { source: "db", items: [] };
   }
 }
 
@@ -123,39 +138,74 @@ export async function fetchWorkflows(): Promise<
   if (error) return { source: "error", error: error.message };
   if (data && data.length > 0) return { source: "db", items: data as Workflow[] };
 
-  return { source: "demo", items: DEMO_WORKFLOWS };
+  return isDemoEnabled()
+    ? { source: "demo", items: DEMO_WORKFLOWS }
+    : { source: "db", items: [] };
 }
 
 // ── Conversations & Messages ──────────────────────────────
+// Live chat goes through the backend AI engine (org-scoped, real agent
+// replies). Direct Supabase is only a fallback when the backend is unreachable,
+// and demo rows only appear for pre-seeded `demo-` conversations.
+
+function isDemoConversation(id: string) {
+  return id.startsWith("demo-");
+}
+
 export async function fetchConversations(): Promise<
   { source: "db" | "demo"; items: AIConversation[] } | { source: "error"; error: string }
 > {
-  const orgId = await getCurrentOrgId();
-  let query = supabase
-    .from("ai_conversations")
-    .select("*")
-    .order("updated_at", { ascending: false });
-  if (orgId) query = query.eq("organization_id", orgId);
-  const { data, error } = await query;
-
-  if (error) return { source: "error", error: error.message };
-  if (data && data.length > 0) return { source: "db", items: data as AIConversation[] };
-
-  return { source: "demo", items: DEMO_CONVERSATIONS };
+  try {
+    const items = await api.fetchAIConversations();
+    if (items.length > 0) return { source: "db", items };
+    return isDemoEnabled()
+      ? { source: "demo", items: DEMO_CONVERSATIONS }
+      : { source: "db", items: [] };
+  } catch (err) {
+    const message = (err as Error).message ?? "";
+    // Only fall back to direct Supabase when the backend is unreachable —
+    // real server errors (401/403/500) must surface.
+    if (!message.includes("Could not reach the backend")) {
+      return { source: "error", error: message };
+    }
+    const orgId = await getCurrentOrgId();
+    let query = supabase
+      .from("ai_conversations")
+      .select("*")
+      .order("updated_at", { ascending: false });
+    if (orgId) query = query.eq("organization_id", orgId);
+    const { data, error } = await query;
+    if (error) return { source: "error", error: error.message };
+    if (data && data.length > 0) return { source: "db", items: data as AIConversation[] };
+    return isDemoEnabled()
+      ? { source: "demo", items: DEMO_CONVERSATIONS }
+      : { source: "db", items: [] };
+  }
 }
 
 export async function fetchMessages(conversationId: string): Promise<
   { source: "db" | "demo"; items: AIMessage[] } | { source: "error"; error: string }
 > {
-  const { data, error } = await supabase
-    .from("ai_messages")
-    .select("*")
-    .eq("conversation_id", conversationId)
-    .order("created_at", { ascending: true });
-
-  if (error) return { source: "error", error: error.message };
-  if (data && data.length > 0) return { source: "db", items: data as AIMessage[] };
-  return { source: "demo", items: DEMO_MESSAGES };
+  // Demo conversations are UI-only — show their curated demo thread.
+  if (isDemoConversation(conversationId) && isDemoEnabled()) {
+    return { source: "demo", items: DEMO_MESSAGES };
+  }
+  try {
+    const items = await api.fetchAIMessages(conversationId);
+    return { source: "db", items };
+  } catch (err) {
+    const message = (err as Error).message ?? "";
+    if (!message.includes("Could not reach the backend")) {
+      return { source: "error", error: message };
+    }
+    const { data, error } = await supabase
+      .from("ai_messages")
+      .select("*")
+      .eq("conversation_id", conversationId)
+      .order("created_at", { ascending: true });
+    if (error) return { source: "error", error: error.message };
+    return { source: "db", items: (data ?? []) as AIMessage[] };
+  }
 }
 
 export async function createConversation(input: {
@@ -164,26 +214,26 @@ export async function createConversation(input: {
   ai_employee_id: string;
   title: string;
 }): Promise<AIConversation | null> {
-  const { data, error } = await supabase
-    .from("ai_conversations")
-    .insert(input)
-    .select()
-    .single();
-  return error ? null : (data as AIConversation);
+  try {
+    const conv = await api.createAIConversation({
+      ai_employee_id: input.ai_employee_id,
+      title: input.title,
+    });
+    return conv as AIConversation;
+  } catch (err) {
+    const message = (err as Error).message ?? "";
+    if (!message.includes("Could not reach the backend")) {
+      return null;
+    }
+    const { data, error } = await supabase
+      .from("ai_conversations")
+      .insert(input)
+      .select()
+      .single();
+    return error ? null : (data as AIConversation);
+  }
 }
 
-export async function sendMessage(
-  conversationId: string,
-  role: "user" | "assistant",
-  message: string
-): Promise<AIMessage | null> {
-  const { data, error } = await supabase
-    .from("ai_messages")
-    .insert({ conversation_id: conversationId, role, message })
-    .select()
-    .single();
-  return error ? null : (data as AIMessage);
-}
 
 // ── Org stats for dashboard/analytics ─────────────────────
 export async function fetchOrgStats(): Promise<OrgStats> {

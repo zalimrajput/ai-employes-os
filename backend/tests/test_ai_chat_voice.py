@@ -102,6 +102,7 @@ def test_voice_success_feeds_transcribed_text_into_same_turn(db, monkeypatch):
         history_messages=None,
         model=None,
         temperature=0.3,
+        images=None,
     ):
         captured["text"] = user_message
         captured["conversation"] = conversation
@@ -247,6 +248,7 @@ def test_text_only_endpoint_unchanged_still_works(db, monkeypatch):
         employee=None,
         history_messages=None,
         model=None,
+        images=None,
     ):
         captured["text"] = user_message
         return "plain text reply", "general"

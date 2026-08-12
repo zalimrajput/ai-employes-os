@@ -10,8 +10,16 @@ services:
       - DATABASE_URL=postgresql+psycopg2://postgres:postgres@postgres:5432/ai_employee_os
       - REDIS_URL=redis://redis:6379/0
     depends_on:
-      - postgres
-      - redis
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
     restart: unless-stopped
 
   worker:
@@ -24,7 +32,28 @@ services:
       - DATABASE_URL=postgresql+psycopg2://postgres:postgres@postgres:5432/ai_employee_os
       - REDIS_URL=redis://redis:6379/0
     depends_on:
-      - api
+      api:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # Celery Beat — schedules periodic tasks (recurring invoices, stale
+  # thread follow-ups). Without this service those jobs NEVER run.
+  beat:
+    build: .
+    container_name: ai_employee_os_beat
+    command: ["celery", "-A", "workers.celery_app", "beat", "--loglevel=info"]
+    env_file:
+      - .env
+    environment:
+      - DATABASE_URL=postgresql+psycopg2://postgres:postgres@postgres:5432/ai_employee_os
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      api:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     restart: unless-stopped
 
   postgres:
@@ -37,15 +66,32 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
     ports:
+      # Comment out this port mapping in production (or bind to 127.0.0.1:5432:5432)
+      # so the database is not exposed publicly.
       - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d ai_employee_os"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     restart: unless-stopped
 
   redis:
     image: redis:7-alpine
     container_name: ai_employee_os_redis
+    command: ["redis-server", "--appendonly", "yes"]
     ports:
+      # Comment out in production, or bind to 127.0.0.1:6379:6379.
       - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - redisdata:/data
     restart: unless-stopped
 
 volumes:
   pgdata:
+  redisdata:

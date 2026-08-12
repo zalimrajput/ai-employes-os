@@ -16,9 +16,9 @@ logger = logging.getLogger("app.ai.retriever")
 
 def _vector_ok() -> bool:
     try:
-        from app.core.config import settings
+        from app.ai.embeddings import embeddings_available
 
-        return bool(settings.OPENAI_API_KEY)
+        return embeddings_available()
     except Exception:
         return False
 
@@ -30,6 +30,11 @@ def _embed_query(query: str):
     return vectors[0] if vectors else None
 
 
+def _vector_param(vector) -> str:
+    """pgvector text form ("[0.1,0.2,...]") for raw-SQL binding."""
+    return "[" + ",".join(repr(float(x)) for x in vector) + "]"
+
+
 def _vector_search_articles(
     db: Session, organization_id, vector, limit: int
 ) -> list[KnowledgeArticle]:
@@ -39,15 +44,29 @@ def _vector_search_articles(
         "SELECT id, title, content, source "
         "FROM knowledge_articles WHERE organization_id = :org "
         "AND embedding IS NOT NULL "
-        "ORDER BY embedding <=> :v ASC LIMIT :lim"
+        "ORDER BY embedding <=> CAST(:v AS vector) ASC LIMIT :lim"
     )
-    rows = db.execute(sql, {"org": str(organization_id), "v": vector, "lim": limit})
+    rows = db.execute(
+        sql,
+        {"org": str(organization_id), "v": _vector_param(vector), "lim": limit},
+    )
     return [
         KnowledgeArticle(
             id=r[0], title=r[1], content=r[2], source=r[3]
         )
         for r in rows
     ]
+
+
+def _keyword_score(query_lower: str, haystack: str) -> int:
+    """Score text against a query; whole-phrase hits weigh more than words."""
+    haystack_l = (haystack or "").lower()
+    keywords = [w for w in query_lower.split() if len(w) > 3]
+    if not keywords:
+        return 1 if query_lower and query_lower in haystack_l else 0
+    return haystack_l.count(query_lower) * 3 + sum(
+        haystack_l.count(w) for w in keywords
+    )
 
 
 def retrieve_documents(
@@ -62,16 +81,17 @@ def retrieve_documents(
             "SELECT filename, extracted_text "
             "FROM documents WHERE organization_id = :org "
             "AND embedding IS NOT NULL "
-            "ORDER BY embedding <=> :v LIMIT :limit"
+            "ORDER BY embedding <=> CAST(:v AS vector) LIMIT :limit"
         )
         rows = db.execute(
-            sql, {"org": str(organization_id), "v": vector, "limit": limit}
+            sql,
+            {"org": str(organization_id), "v": _vector_param(vector), "limit": limit},
         ).fetchall()
         return [
             {"title": r[0] or "Document", "content": (r[1] or "")[:2000], "source": "document"}
             for r in rows
         ]
-    # keyword fallback
+    # keyword fallback (title + a larger text window, phrase-aware scoring)
     rows = (
         db.query(Document)
         .filter(Document.organization_id == organization_id)
@@ -80,14 +100,12 @@ def retrieve_documents(
         .all()
     )
     query_lower = query.lower()
-    keywords = [w for w in query_lower.split() if len(w) > 3]
     scored = []
     for doc in rows:
-        text = (doc.extracted_text or "")[:4000]
-        if not text:
+        haystack = f"{doc.filename or ''} {(doc.extracted_text or '')[:12000]}"
+        if not (doc.extracted_text or "").strip():
             continue
-        score = text.lower().count(query_lower)
-        score += sum(text.lower().count(w) for w in keywords)
+        score = _keyword_score(query_lower, haystack)
         if score:
             scored.append((score, doc))
     scored.sort(key=lambda pair: pair[0], reverse=True)
@@ -123,12 +141,10 @@ def retrieve_articles(
         .all()
     )
     query_lower = query.lower()
-    keywords = [w for w in query_lower.split() if len(w) > 3]
     scored = []
     for article in rows:
-        haystack = f"{article.title or ''} {article.content or ''}".lower()
-        score = haystack.count(query_lower)
-        score += sum(haystack.count(w) for w in keywords)
+        haystack = f"{article.title or ''} {article.content or ''}"
+        score = _keyword_score(query_lower, haystack)
         if score:
             scored.append((score, article))
     scored.sort(key=lambda pair: pair[0], reverse=True)

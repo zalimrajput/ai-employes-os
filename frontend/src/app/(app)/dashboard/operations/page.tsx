@@ -49,9 +49,14 @@ export default function OperationsDashboardPage() {
         icon={Gauge}
         gradient="from-warning to-accent"
         actions={
-          <Link href="/dashboard/workflows" className="inline-flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-primary to-secondary px-4 py-2.5 text-sm font-bold text-white shadow-lg shadow-primary/25 transition-all hover:shadow-primary/40">
-            Manage workflows <ArrowRight className="h-4 w-4" />
-          </Link>
+          <>
+            <Link href="/dashboard/chat?agent=inventory" className="inline-flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-primary to-secondary px-4 py-2.5 text-sm font-bold text-white shadow-lg shadow-primary/25 transition-all hover:shadow-primary/40">
+              Ask AI Operations <ArrowRight className="h-4 w-4" />
+            </Link>
+            <Link href="/dashboard/workflows" className="inline-flex items-center gap-1.5 rounded-xl border border-border-soft bg-card-soft/60 px-4 py-2.5 text-sm font-bold text-slate-200 transition-all hover:bg-card-soft">
+              Manage workflows
+            </Link>
+          </>
         }
       />
 

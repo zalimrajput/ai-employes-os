@@ -51,14 +51,18 @@ router.include_router(
 async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
     body = await request.body()
     signature = request.headers.get("stripe-signature", "")
-    if getattr(settings, "STRIPE_WEBHOOK_SECRET", None):
+    # Each Stripe webhook endpoint has its own signing secret; fall back to the
+    # invoice webhook secret when STRIPE_BILLING_WEBHOOK_SECRET is not set.
+    webhook_secret = (
+        getattr(settings, "STRIPE_BILLING_WEBHOOK_SECRET", None)
+        or getattr(settings, "STRIPE_WEBHOOK_SECRET", None)
+    )
+    if webhook_secret:
         try:
             import stripe
 
             stripe.api_key = settings.STRIPE_SECRET_KEY or ""
-            event = stripe.Webhook.construct_event(
-                body, signature, settings.STRIPE_WEBHOOK_SECRET
-            )
+            event = stripe.Webhook.construct_event(body, signature, webhook_secret)
         except Exception:
             raise HTTPException(status_code=400, detail="Invalid signature")
     else:

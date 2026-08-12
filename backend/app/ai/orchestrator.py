@@ -47,6 +47,7 @@ def execute_turn(
     history_messages=None,
     model: Optional[str] = None,
     temperature: float = 0.3,
+    images: Optional[list[dict]] = None,
 ) -> tuple[str, str]:
     """Run one full agent turn with memory + RAG context injected.
 
@@ -74,5 +75,6 @@ def execute_turn(
         context=build_context_turns(history_messages),
         model=model or (employee.model if employee else None),
         temperature=temperature,
+        images=images,
     )
     return reply, agent.key

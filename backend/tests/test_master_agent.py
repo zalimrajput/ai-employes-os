@@ -36,7 +36,11 @@ def _delegate():
 
 def test_master_registered():
     assert agent_by_key("master").key == "master"
-    assert agent_by_key("master").allowed_tools == ["delegate_task"]
+    assert agent_by_key("master").allowed_tools == [
+        "delegate_task",
+        "send_email",
+        "send_quotation_email",
+    ]
     assert "delegate_task" in MASTER_AGENT.allowed_tools
 
 

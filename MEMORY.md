@@ -1,5 +1,7 @@
 # Project Memory
 
+> 📌 **Current maintained snapshot: [SYSTEM_SETUP.md](SYSTEM_SETUP.md)** — agents, tools, integrations, workers, workflows, and configuration.
+
 This document tracks the long-term context, architectural decisions, and technical debt of the AI Employee OS project.
 
 ## 1. Architecture Decisions
@@ -19,16 +21,21 @@ This document tracks the long-term context, architectural decisions, and technic
   - Variables/Functions: `camelCase`
 
 ## 3. Completed Work
-- **Database Schema:** 64 migrations completed, resulting in 71 tables covering 20+ business modules (CRM, HR, Sales, Billing).
-- **RLS Implementation:** Robust RLS applied to all 71 tables.
-- **Frontend/Backend Scaffolding:** Initial directory structures and boilerplate files created.
+- **Database Schema:** 64+ migrations → 71 tables across 20+ modules (CRM, HR, Sales, Billing) with full RLS multi-tenancy.
+- **Backend + AI Engine:** FastAPI API with **14 AI agents** (master coordinator + 13 specialists) and **59 tools**; model router (Gemini 2.5 Flash/Pro default, OpenRouter optional) with image/screenshot understanding; RAG (pgvector, OpenAI → Gemini embedding fallback).
+- **Integrations:** 13 providers (Google ×4, Microsoft ×3, Slack, Zoho, Xero, WhatsApp, Stripe, R2) — per-org encrypted OAuth tokens with auto-refresh.
+- **Workers:** Celery (email cascade, WhatsApp, documents, embeddings, reports, notifications, follow-up scan, recurring invoices).
+- **Frontend:** Next.js dashboards wired to the backend; auth via Supabase JWT.
+- **Tests:** Backend test suite passing (agents, model-router fallback, integrations, auth, workflows).
 
-## 4. Pending Work
-- **Backend Implementation:** The backend is currently a shell. 95% of modules (AI Engine, agents, specific API routes) are 0-byte stub files.
-- **Frontend Implementation:** The UI consists of boilerplate Next.js pages. Dashboards, login flows, and API integration are missing.
-- **Environment Bootstrapping:** `requirements.txt` needs fixing to properly install FastAPI and its dependencies.
+## 4. Pending Work (production hardening)
+- **Google:** publish OAuth app to production + app verification for sensitive scopes (removes warning + 100-user cap).
+- **WhatsApp:** real business number + Meta business verification (currently a test number).
+- **Xero:** App Store certification so other organisations can connect.
+- **Slack:** public distribution for other workspaces.
+- **Infra:** own domain + HTTPS deployment (redirect URIs currently localhost/ngrok).
 
-## 5. Known Issues & Technical Debt
+## 5. Known Issues & Technical Debt *(historical — resolved during implementation)*
 - **Corrupted Virtual Environment:** The `backend/venv` currently contains only `pip` and `setuptools`. Dependencies are not installed.
 - **Dependency Conflicts:** `requirements.txt` includes `pyjwt` instead of `python-jose`, missing `email-validator`, and uses the async postgres driver incorrectly for sync SQLAlchemy setup.
 - **Model Drift:** The existing backend models (e.g., `User`) do not match the updated Supabase schema (e.g., expecting `password_hash` which was dropped in migration 0057).

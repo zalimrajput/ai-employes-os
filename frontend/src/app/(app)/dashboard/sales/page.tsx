@@ -61,7 +61,7 @@ export default function SalesDashboardPage() {
         icon={TrendingUp}
         gradient="from-success to-accent"
         actions={
-          <Link href="/dashboard/chat" className="inline-flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-primary to-secondary px-4 py-2.5 text-sm font-bold text-white shadow-lg shadow-primary/25 transition-all hover:shadow-primary/40">
+          <Link href="/dashboard/chat?agent=sales" className="inline-flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-primary to-secondary px-4 py-2.5 text-sm font-bold text-white shadow-lg shadow-primary/25 transition-all hover:shadow-primary/40">
             Delegate follow-ups <ArrowRight className="h-4 w-4" />
           </Link>
         }

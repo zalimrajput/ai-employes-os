@@ -1,6 +1,7 @@
 "use client";
 
-import { CalendarClock, GraduationCap, UserCheck, UserCog, Users } from "lucide-react";
+import { ArrowRight, CalendarClock, GraduationCap, UserCheck, UserCog, Users } from "lucide-react";
+import Link from "next/link";
 import { DashboardHeader } from "@/components/dashboard/dashboard-header";
 import { ModuleWidgets } from "@/components/dashboard/module-widgets";
 import { StatCard } from "@/components/dashboard/stat-card";
@@ -32,6 +33,11 @@ export default function HRDashboardPage() {
         description="Headcount, attendance, hiring pipeline, and team well-being at a glance."
         icon={UserCog}
         gradient="from-warning to-danger"
+        actions={
+          <Link href="/dashboard/chat?agent=hr" className="inline-flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-primary to-secondary px-4 py-2.5 text-sm font-bold text-white shadow-lg shadow-primary/25 transition-all hover:shadow-primary/40">
+            Ask AI HR <ArrowRight className="h-4 w-4" />
+          </Link>
+        }
       />
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">

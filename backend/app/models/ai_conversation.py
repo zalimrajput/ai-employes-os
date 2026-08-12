@@ -1,5 +1,6 @@
 from sqlalchemy import Column, String, ForeignKey, DateTime
 from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 
 from app.models.base import Base
@@ -35,6 +36,12 @@ class AIConversation(Base):
         UUID(as_uuid=True),
         ForeignKey("ai_employees.id"),
         nullable=True
+    )
+
+    ai_employee = relationship(
+        "AIEmployee",
+        foreign_keys=[ai_employee_id],
+        lazy="joined",
     )
 
 

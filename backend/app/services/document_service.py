@@ -129,6 +129,11 @@ def ingest_document(
 
     chunks = chunk_text(text)[:50]
     vectors = embed(chunks) if chunks else None
+    if chunks and vectors is None:
+        logger.warning(
+            "embeddings not created for %s — no embedding provider configured",
+            filename,
+        )
 
     doc.embedding = vectors[0] if vectors else _embedding_for_chunk(text)
     articles = []

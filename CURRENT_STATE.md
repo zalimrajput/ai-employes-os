@@ -1,5 +1,9 @@
 # CURRENT_STATE.md
-**Source of Truth for AI Employee OS Repository Status**
+
+> ⚠️ **OUTDATED (2026-08-03) — superseded by [SYSTEM_SETUP.md](SYSTEM_SETUP.md).**
+> This document describes the repository when it was a scaffold. The backend AI engine, agents, tools, 13 integrations, workers, and frontend dashboards are now implemented and tested — see **SYSTEM_SETUP.md** for the current, maintained snapshot.
+
+**Source of Truth for AI Employee OS Repository Status** *(historical)*
 **Date:** 2026-08-03
 
 This document catalogs the exact implementation state of the repository based on hard evidence. 

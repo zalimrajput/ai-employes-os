@@ -157,6 +157,23 @@ def _notify_sales(db, organization_id, invoice_number, customer_name):
             "generated and follow-up scheduled."
         ),
     )
+
+    # Best-effort Slack post when the org has Slack connected (never blocks
+    # the workflow if Slack is missing or the API call fails).
+    try:
+        from app.integrations.slack.service import post_message as slack_post
+
+        slack_post(
+            db,
+            organization_id,
+            text=(
+                f":tada: Invoice {invoice_number} paid by {customer_name} — "
+                "receipt generated and follow-up scheduled."
+            ),
+        )
+    except Exception:  # noqa: BLE001 - Slack is optional
+        logger.info("slack post skipped (not connected or failed)")
+
     return note.id is not None
 
 

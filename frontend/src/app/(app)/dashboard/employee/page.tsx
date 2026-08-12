@@ -47,7 +47,7 @@ export default function EmployeeDashboardPage() {
         icon={Sparkles}
         gradient="from-primary to-success"
         actions={
-          <Link href="/dashboard/chat" className="inline-flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-primary to-secondary px-4 py-2.5 text-sm font-bold text-white shadow-lg shadow-primary/25 transition-all hover:shadow-primary/40">
+          <Link href="/dashboard/chat?agent=executive" className="inline-flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-primary to-secondary px-4 py-2.5 text-sm font-bold text-white shadow-lg shadow-primary/25 transition-all hover:shadow-primary/40">
             <MessageSquare className="h-4 w-4" /> Ask AI
           </Link>
         }
@@ -178,7 +178,7 @@ export default function EmployeeDashboardPage() {
                   <p className="truncate text-sm font-bold text-white">{e.name}</p>
                   <p className="truncate text-xs text-slate-500">{e.description}</p>
                 </div>
-                <Link href="/dashboard/chat">
+                <Link href={`/dashboard/chat?employee=${e.id}`}>
                   <Badge variant="accent" className="cursor-pointer">Chat</Badge>
                 </Link>
               </motion.div>

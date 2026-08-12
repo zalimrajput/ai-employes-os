@@ -1,20 +1,18 @@
 # AI Employee OS
 
-**Status:** Proof of Concept / Scaffold (Not Production Ready)
+**Status:** Functional multi-tenant AI platform (development build)
 
-AI Employee OS is intended to be a multi-tenant SaaS platform that acts as an all-in-one operating system for businesses, augmented with specialized AI agents.
-
-Currently, the project is a **scaffold**. The database schema is fully mature, but the backend AI engine and frontend dashboards are entirely unwritten. 
+AI Employee OS is a multi-tenant SaaS platform that acts as an all-in-one operating system for businesses, augmented with specialized AI agents. The backend AI engine, frontend dashboards, external integrations, and background workers are implemented and tested.
 
 ## Current Architecture State
 
-- **Frontend:** Next.js 16. Scaffolded pages exist (`/dashboard/crm`), but they use hardcoded demo data. Not connected to the backend.
-- **Backend:** FastAPI. 95% of the codebase consists of 0-byte stub files. Cannot currently run locally due to dependency conflicts in `requirements.txt`.
-- **Database:** PostgreSQL (Supabase). Fully implemented (71 tables) with Row Level Security (RLS) enforcing multi-tenancy.
+- **Frontend:** Next.js — real dashboards (CRM, Sales, Finance, HR, …) connected to the backend API via React Query; auth via Supabase.
+- **Backend:** FastAPI — AI engine with **14 AI agents / 59 tools**, Gemini + OpenRouter model routing (with image/screenshot understanding), RAG knowledge base, **13 external integrations**, and Celery workers.
+- **Database:** PostgreSQL (Supabase) — 71 tables with Row Level Security (RLS) enforcing multi-tenancy.
 
-## Running Locally (Attempting to Run)
+## Running Locally
 
-The backend is currently broken out of the box. Do not attempt to run it until `requirements.txt` is fixed and the `pyjwt` vs `python-jose` conflict is resolved.
+See the maintained snapshot in **SYSTEM_SETUP.md** for the full current setup (LLM config, agents, tools, integrations, workers, workflows) and `INTEGRATION_SETUP.md` for provider console URLs.
 
 ### Database Setup
 ```bash
@@ -24,4 +22,9 @@ supabase db push
 ```
 
 ## Documentation
-See the generated `CURRENT_STATE.md` and `BACKEND_GAP_ANALYSIS.md` for a precise breakdown of what exists and what is missing.
+
+- **[SYSTEM_SETUP.md](SYSTEM_SETUP.md)** — *maintained*: current agents, tools, integrations, workers, workflows, and configuration.
+- **[DASHBOARD_MATRIX.md](DASHBOARD_MATRIX.md)** — *maintained*: which AI agent works with which dashboard, and which human role can access which dashboards.
+- **INTEGRATION_SETUP.md** — callback/webhook URLs for every provider console.
+- `ARCHITECTURE.md`, `API_SPEC.md`, `PRD.md`, `DESIGN.md`, `MEMORY.md`.
+- `CURRENT_STATE.md` / `BACKEND_GAP_ANALYSIS.md` — historical scaffold-era snapshots, superseded by `SYSTEM_SETUP.md`.

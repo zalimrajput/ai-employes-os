@@ -295,6 +295,100 @@ def test_webhook_already_paid_does_not_refire(db, monkeypatch):
         _teardown(db, org)
 
 
+def test_webhook_invoice_paid_event_marks_paid_via_payment_intent(db, monkeypatch):
+    """The webhook also accepts invoice.paid / invoice.payment_succeeded by
+    resolving org+invoice from the PaymentIntent metadata (which Stripe copies
+    from the Checkout Session). This matches the events registered in the
+    Stripe dashboard."""
+    import stripe
+
+    webhook_secret = "whsec_test_dummy"
+    monkeypatch.setattr("app.core.config.settings.STRIPE_WEBHOOK_SECRET", webhook_secret)
+    monkeypatch.setattr("app.core.config.settings.STRIPE_SECRET_KEY", "sk_test_dummy")
+
+    from fastapi.testclient import TestClient
+    from app.main import app
+
+    org = _org(db)
+    inv = _invoice(db, org, status="unpaid")
+
+    monkeypatch.setattr(
+        "app.services.workflow_service.on_invoice_paid",
+        lambda db_, oid, iid: {"email_sent": False},
+    )
+
+    class FakePI:
+        metadata = {"organization_id": str(org.id), "invoice_id": str(inv.id)}
+
+    monkeypatch.setattr(stripe.PaymentIntent, "retrieve", staticmethod(lambda *a, **k: FakePI()))
+
+    body = json.dumps({
+        "id": "evt_inv_paid",
+        "object": "event",
+        "type": "invoice.paid",
+        "data": {"object": {"id": "in_test_1", "payment_intent": "pi_test_1"}},
+    }).encode()
+    import hashlib
+    import hmac
+    import time
+
+    ts = int(time.time())
+    signature = hmac.new(webhook_secret.encode(), f"{ts}.".encode() + body, hashlib.sha256).hexdigest()
+    header = f"t={ts},v1={signature}"
+
+    try:
+        with TestClient(app) as client:
+            resp = client.post(
+                "/api/v1/invoices/stripe-webhook",
+                content=body,
+                headers={"stripe-signature": header},
+            )
+        assert resp.status_code == 200
+        assert resp.json()["applied"] is True
+        assert resp.json()["invoice_id"] == str(inv.id)
+        from app.models.invoice import Invoice
+
+        db.expire_all()
+        fresh = db.query(Invoice).filter(Invoice.id == inv.id).first()
+        assert fresh.status == "paid"
+    finally:
+        _teardown(db, org)
+
+
+def test_webhook_alias_path_finance_invoices_works(db, monkeypatch):
+    """Webhooks registered at the legacy /finance/invoices/stripe-webhook URL
+    must still work — the handler is mounted at both paths."""
+    webhook_secret = "whsec_test_dummy"
+    monkeypatch.setattr("app.core.config.settings.STRIPE_WEBHOOK_SECRET", webhook_secret)
+    monkeypatch.setattr("app.core.config.settings.STRIPE_SECRET_KEY", "sk_test_dummy")
+
+    from fastapi.testclient import TestClient
+    from app.main import app
+
+    org = _org(db)
+    inv = _invoice(db, org, status="unpaid")
+
+    monkeypatch.setattr(
+        "app.services.workflow_service.on_invoice_paid",
+        lambda db_, oid, iid: {"email_sent": False},
+    )
+
+    body, signature = _signed_event_payload(inv, org, webhook_secret)
+
+    try:
+        with TestClient(app) as client:
+            resp = client.post(
+                "/api/v1/finance/invoices/stripe-webhook",
+                content=body,
+                headers={"stripe-signature": signature},
+            )
+        assert resp.status_code == 200
+        assert resp.json()["applied"] is True
+        assert resp.json()["invoice_id"] == str(inv.id)
+    finally:
+        _teardown(db, org)
+
+
 def test_webhook_bad_signature_rejected(db, monkeypatch):
     import stripe
 

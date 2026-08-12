@@ -36,7 +36,7 @@ export default function DashboardPage() {
           <Button variant="secondary" onClick={() => (window.location.href = "/dashboard/employees")}>
             <Plus className="h-4 w-4" /> Hire AI
           </Button>
-          <Link href="/dashboard/chat">
+          <Link href="/dashboard/chat?agent=master">
             <Button>
               <MessageSquare className="h-4 w-4" /> Delegate a task
             </Button>

@@ -6,6 +6,7 @@ from app.ai.tools.crm_tools import CRM_TOOLS
 from app.ai.tools.delegate_tools import DELEGATE_TOOLS
 from app.ai.tools.email_tools import EMAIL_TOOLS
 from app.ai.tools.hr_tools import HR_TOOLS
+from app.ai.tools.integration_tools import INTEGRATION_TOOLS
 from app.ai.tools.invoice_tools import INVOICE_TOOLS
 from app.ai.tools.inventory_tools import INVENTORY_TOOLS
 from app.ai.tools.knowledge_tools import KNOWLEDGE_TOOLS
@@ -19,6 +20,7 @@ for _group in [
     CRM_TOOLS,
     HR_TOOLS,
     INVOICE_TOOLS,
+    INTEGRATION_TOOLS,
     INVENTORY_TOOLS,
     KNOWLEDGE_TOOLS,
     MARKETING_TOOLS,

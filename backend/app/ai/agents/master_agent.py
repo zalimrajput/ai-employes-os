@@ -39,6 +39,10 @@ def master_system_prompt(specialists=None) -> str:
         "one short line per completed action (e.g. \u2713 Created quotation \u2026, "
         "\u2713 Sent by email \u2026, \u2713 Scheduled meeting \u2026). "
         "Only mark items you actually completed; never invent a completed step.\n"
+        "6. You can send email yourself with the send_email tool (the "
+        "organization's connected Gmail). When the user asks to send an email, "
+        "use send_email directly rather than delegating. It returns a clear "
+        "error if Gmail is not connected — report that to the user.\n"
         "Be clear about what each specialist did and about any limitations."
     )
 
@@ -49,7 +53,7 @@ def make_master(system_prompt: str) -> AgentDefinition:
         display_name="AI Manager",
         role="Master Coordinator",
         description="Plans and delegates multi-step work to the specialist agents.",
-        allowed_tools=["delegate_task"],
+        allowed_tools=["delegate_task", "send_email", "send_quotation_email"],
         system_prompt=system_prompt,
         role_synonyms=("master", "coordinator", "manager", "orchestrator"),
     )

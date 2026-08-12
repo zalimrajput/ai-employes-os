@@ -87,7 +87,7 @@ export default function EmployeeDetailPage() {
             </div>
             <div className="flex gap-2">
               <Button variant="secondary"><Pencil className="h-4 w-4" /> Edit</Button>
-              <Link href="/dashboard/chat"><Button><MessageSquare className="h-4 w-4" /> Chat</Button></Link>
+              <Link href={`/dashboard/chat?employee=${employee.id}`}><Button><MessageSquare className="h-4 w-4" /> Chat</Button></Link>
             </div>
           </div>
         </div>

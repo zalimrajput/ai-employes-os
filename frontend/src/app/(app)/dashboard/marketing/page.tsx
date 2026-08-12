@@ -1,6 +1,7 @@
 "use client";
 
-import { BarChart3, Megaphone, PenLine, Share2, Target, Users } from "lucide-react";
+import { ArrowRight, BarChart3, Megaphone, PenLine, Share2, Target, Users } from "lucide-react";
+import Link from "next/link";
 import { DashboardHeader } from "@/components/dashboard/dashboard-header";
 import { ModuleWidgets } from "@/components/dashboard/module-widgets";
 import { StatCard } from "@/components/dashboard/stat-card";
@@ -34,6 +35,11 @@ export default function MarketingDashboardPage() {
         description="Campaign performance, audience growth, content output, and channel ROI."
         icon={Megaphone}
         gradient="from-secondary to-danger"
+        actions={
+          <Link href="/dashboard/chat?agent=marketing" className="inline-flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-primary to-secondary px-4 py-2.5 text-sm font-bold text-white shadow-lg shadow-primary/25 transition-all hover:shadow-primary/40">
+            Ask AI Marketing <ArrowRight className="h-4 w-4" />
+          </Link>
+        }
       />
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">

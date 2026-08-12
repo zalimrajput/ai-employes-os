@@ -327,40 +327,28 @@ def _generate_quotation_pdf(db, org_id, user_id, arguments: dict):
         return {"error": f"{exc.__class__.__name__}: {exc}"}
 
     data = buffer.getvalue()
-    from pathlib import Path
-
-    out_dir = Path(__file__).resolve().parent.parent.parent / "generated_documents"
-    out_dir.mkdir(parents=True, exist_ok=True)
     filename = f"quotation_{quotation.id}.pdf"
-    path = out_dir / filename
-    path.write_bytes(data)
+    from app.services.storage_service import save_blob
 
-    storage_path = f"/documents/{filename}"
-    try:
-        from app.services.storage_service import register_file
+    stored = save_blob(
+        db,
+        org_id,
+        filename,
+        data,
+        mime_type="application/pdf",
+        uploaded_by=_to_optional_uuid(user_id),
+        entity_type="quotation",
+        entity_id=quotation.id,
+    )
 
-        register_file(
-            db,
-            org_id,
-            uploaded_by=_to_optional_uuid(user_id),
-            file_name=filename,
-            file_path=storage_path,
-            mime_type="application/pdf",
-            file_size=len(data),
-            bucket="documents",
-            entity_type="quotation",
-            entity_id=quotation.id,
-        )
-    except Exception:  # noqa: BLE001 - storage registration is best-effort
-        pass
-
-    quotation.pdf_url = storage_path
+    quotation.pdf_url = stored["storage_path"]
     db.add(quotation)
     db.commit()
     return {
         "quotation_id": str(quotation.id),
-        "pdf_url": storage_path,
-        "file": str(path),
+        "pdf_url": stored["storage_path"],
+        "file": stored["file"],
+        "storage_provider": stored["storage_provider"],
     }
 
 
@@ -385,40 +373,28 @@ def _generate_invoice_pdf(db, org_id, user_id, arguments: dict):
         return {"error": f"{exc.__class__.__name__}: {exc}"}
 
     data = buffer.getvalue()
-    from pathlib import Path
-
-    out_dir = Path(__file__).resolve().parent.parent.parent / "generated_documents"
-    out_dir.mkdir(parents=True, exist_ok=True)
     filename = f"invoice_{invoice.id}.pdf"
-    path = out_dir / filename
-    path.write_bytes(data)
+    from app.services.storage_service import save_blob
 
-    storage_path = f"/documents/{filename}"
-    try:
-        from app.services.storage_service import register_file
+    stored = save_blob(
+        db,
+        org_id,
+        filename,
+        data,
+        mime_type="application/pdf",
+        uploaded_by=_to_optional_uuid(user_id),
+        entity_type="invoice",
+        entity_id=invoice.id,
+    )
 
-        register_file(
-            db,
-            org_id,
-            uploaded_by=_to_optional_uuid(user_id),
-            file_name=filename,
-            file_path=storage_path,
-            mime_type="application/pdf",
-            file_size=len(data),
-            bucket="documents",
-            entity_type="invoice",
-            entity_id=invoice.id,
-        )
-    except Exception:  # noqa: BLE001 - storage registration is best-effort
-        pass
-
-    invoice.pdf_url = storage_path
+    invoice.pdf_url = stored["storage_path"]
     db.add(invoice)
     db.commit()
     return {
         "invoice_id": str(invoice.id),
-        "pdf_url": storage_path,
-        "file": str(path),
+        "pdf_url": stored["storage_path"],
+        "file": stored["file"],
+        "storage_provider": stored["storage_provider"],
     }
 
 
@@ -507,35 +483,22 @@ def _generate_invoice_payment_link(db, org_id, user_id, arguments: dict):
 
     qr_bytes = generate_qr_code_png(link["url"])
 
-    from pathlib import Path
-
-    out_dir = Path(__file__).resolve().parent.parent.parent / "generated_documents"
-    out_dir.mkdir(parents=True, exist_ok=True)
     filename = f"payment_qr_{invoice.id}.png"
-    path = out_dir / filename
-    path.write_bytes(qr_bytes)
+    from app.services.storage_service import save_blob
 
-    storage_path = f"/documents/{filename}"
-    try:
-        from app.services.storage_service import register_file
-
-        register_file(
-            db,
-            org_id,
-            uploaded_by=_to_optional_uuid(user_id),
-            file_name=filename,
-            file_path=storage_path,
-            mime_type="image/png",
-            file_size=len(qr_bytes),
-            bucket="documents",
-            entity_type="invoice",
-            entity_id=invoice.id,
-        )
-    except Exception:  # noqa: BLE001 - storage registration is best-effort
-        pass
+    stored = save_blob(
+        db,
+        org_id,
+        filename,
+        qr_bytes,
+        mime_type="image/png",
+        uploaded_by=_to_optional_uuid(user_id),
+        entity_type="invoice",
+        entity_id=invoice.id,
+    )
 
     invoice.payment_link_url = link["url"]
-    invoice.qr_code_url = storage_path
+    invoice.qr_code_url = stored["storage_path"]
     db.add(invoice)
     db.commit()
     db.refresh(invoice)
@@ -544,6 +507,7 @@ def _generate_invoice_payment_link(db, org_id, user_id, arguments: dict):
         "invoice_id": str(invoice.id),
         "payment_link_url": invoice.payment_link_url,
         "qr_code_url": invoice.qr_code_url,
+        "storage_provider": stored["storage_provider"],
     }
 
 
@@ -558,6 +522,40 @@ def _get_quotation(db, org_id, quotation_id):
         )
         .first()
     )
+
+
+def _list_quotations(db, org_id, user_id, arguments: dict):
+    """List the org's quotations, optionally filtered by customer or status.
+
+    Returns id + number + customer id so agents can find a quotation to
+    send/approve without guessing UUIDs.
+    """
+    from app.models.quotation import Quotation
+
+    query = db.query(Quotation).filter(Quotation.organization_id == org_id)
+    customer_id = _to_optional_uuid(arguments.get("customer_id"))
+    if customer_id:
+        query = query.filter(Quotation.customer_id == customer_id)
+    status = arguments.get("status")
+    if status:
+        query = query.filter(Quotation.status == status)
+    rows = (
+        query.order_by(Quotation.created_at.desc())
+        .limit(arguments.get("limit", 50))
+        .all()
+    )
+    return [
+        {
+            "id": str(q.id),
+            "quotation_number": q.quotation_number,
+            "customer_id": str(q.customer_id) if q.customer_id else None,
+            "status": q.status,
+            "subtotal": float(q.subtotal or 0),
+            "total": float(q.total or 0),
+            "created_at": q.created_at.isoformat() if q.created_at else None,
+        }
+        for q in rows
+    ]
 
 
 def _submit_quotation_for_approval(db, org_id, user_id, arguments: dict):
@@ -784,6 +782,24 @@ INVOICE_TOOLS: dict[str, ToolSpec] = {
             "required": ["items"],
         },
         handler=_create_quotation,
+    ),
+    "list_quotations": ToolSpec(
+        name="list_quotations",
+        description=(
+            "List the organization's quotations, optionally filtered by "
+            "customer_id (UUID from search_crm) or status (draft, "
+            "pending_approval, approved, rejected, sent). Use this to find a "
+            "quotation's id before sending or approving it."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "customer_id": {"type": "string"},
+                "status": {"type": "string"},
+                "limit": {"type": "integer"},
+            },
+        },
+        handler=_list_quotations,
     ),
     "generate_quotation_pdf_tool": ToolSpec(
         name="generate_quotation_pdf_tool",

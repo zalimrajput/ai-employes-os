@@ -62,8 +62,14 @@ def build_messages(
     memory: list[str] | None = None,
     context: list[dict] | None = None,
     user_message: str,
+    images: list[dict] | None = None,
 ) -> list[dict]:
-    """Assemble the chat history: system + memory + prior turns + user message."""
+    """Assemble the chat history: system + memory + prior turns + user message.
+
+    When ``images`` (OpenAI-style ``{"type": "image_url", "image_url": {"url":
+    "data:image/...;base64,..."}}`` parts) are provided, the user message becomes
+    a multimodal content list so vision-capable models can analyze screenshots.
+    """
     tools = [t for t in (allowed_tools or []) if get_tool(t) is not None]
     system = agent.build_system_prompt(org_name=org_name)
     tools_block = ", ".join(sorted(tools)) if tools else "none"
@@ -75,7 +81,18 @@ def build_messages(
     messages: list[dict] = [{"role": "system", "content": system}]
     if context:
         messages.extend(context)
-    messages.append({"role": "user", "content": user_message})
+
+    if images:
+        content: Any = [{"type": "text", "text": user_message}]
+        for img in images:
+            url = img.get("image_url") if isinstance(img, dict) else img
+            if isinstance(url, dict):
+                url = url.get("url")
+            if url:
+                content.append({"type": "image_url", "image_url": {"url": url}})
+        messages.append({"role": "user", "content": content})
+    else:
+        messages.append({"role": "user", "content": user_message})
     return messages
 
 
@@ -104,6 +121,7 @@ def run_agent(
     model: Optional[str] = None,
     temperature: float = 0.3,
     max_tokens: Optional[int] = None,
+    images: list[dict] | None = None,
 ) -> str:
     """Execute a single user turn and return the final text answer."""
     messages = build_messages(
@@ -114,6 +132,7 @@ def run_agent(
         memory=memory,
         context=context,
         user_message=user_message,
+        images=images,
     )
     tools = _openai_tools(agent.allowed_tools)
     native = True

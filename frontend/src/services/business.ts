@@ -26,13 +26,26 @@ export type DataResult<T> =
   | { source: "db" | "demo"; items: T[] }
   | { source: "error"; error: string };
 
+/**
+ * Demo mode is opt-in via NEXT_PUBLIC_ENABLE_DEMO=true (dev/preview only).
+ * In production (unset/false) empty workspaces return an empty list instead of
+ * curated fake rows, so real customers never see demo data.
+ */
+export function isDemoEnabled(): boolean {
+  return process.env.NEXT_PUBLIC_ENABLE_DEMO === "true";
+}
+
 function withDemo<T>(
   fetcher: () => Promise<T[]>,
   demo: T[]
 ): Promise<DataResult<T>> {
   return fetcher()
     .then((items) =>
-      items.length > 0 ? { source: "db" as const, items } : { source: "demo" as const, items: demo }
+      items.length > 0
+        ? { source: "db" as const, items }
+        : isDemoEnabled()
+          ? { source: "demo" as const, items: demo }
+          : { source: "db" as const, items: [] }
     )
     .catch((err) => ({ source: "error" as const, error: (err as Error).message }));
 }

@@ -102,9 +102,9 @@ export interface Workflow {
 // ── AI Conversations & Messages ───────────────────────────
 export interface AIConversation {
   id: string;
-  organization_id: string;
-  user_id: string;
-  ai_employee_id: string;
+  organization_id?: string | null;
+  user_id?: string | null;
+  ai_employee_id?: string | null;
   title?: string | null;
   status?: string;
   created_at?: string;
@@ -119,6 +119,12 @@ export interface AIMessage {
   tool_calls?: Record<string, unknown> | null;
   metadata?: Record<string, unknown> | null;
   created_at?: string;
+}
+
+/** OpenAI-style image part sent with a chat message (data:image/...;base64,... URI). */
+export interface ImagePart {
+  type: "image_url";
+  image_url: { url: string };
 }
 
 // ── Analytics / Usage ─────────────────────────────────────

@@ -40,21 +40,32 @@ async def lifespan(app: FastAPI):
     logger.info("shutdown complete")
 
 
+is_production = settings.ENVIRONMENT.lower() == "production"
+
 app = FastAPI(
     title=settings.APP_NAME,
     version=settings.VERSION,
     description="Backend API for AI Employee OS. Authentication is Supabase JWT.",
     lifespan=lifespan,
+    # Never expose the interactive Swagger/ReDoc docs in production.
+    docs_url=None if is_production else "/docs",
+    redoc_url=None if is_production else "/redoc",
+    openapi_url=None if is_production else "/openapi.json",
 )
 
 # Allow the Next.js frontend to call the API from the browser.
+# FRONTEND_ORIGIN may be a single origin or a comma-separated list.
+_allowed_origins = [
+    o.strip()
+    for o in (
+        str(settings.FRONTEND_ORIGIN or "").split(",")
+        + ["http://localhost:3000", "http://127.0.0.1:3000"]
+    )
+    if o.strip()
+]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-        settings.FRONTEND_ORIGIN,
-    ],
+    allow_origins=list(dict.fromkeys(_allowed_origins)),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

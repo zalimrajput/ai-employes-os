@@ -76,7 +76,7 @@ def _teardown(db, org):
     db.commit()
 
 
-def _integration(db, org, *, phone_number_id="105329768849298", connected=True):
+def _integration(db, org, *, phone_number_id, connected=True):
     from app.models.integration import Integration
     from app.utils.encryption import encrypt_value
 
@@ -93,12 +93,14 @@ def _integration(db, org, *, phone_number_id="105329768849298", connected=True):
     return row
 
 
-def _webhook_payload(phone_number="15550000001", body="Hello", contacts=True):
+def _webhook_payload(
+    phone_number_id, phone_number="15550000001", body="Hello", contacts=True
+):
     value = {
         "messaging_product": "whatsapp",
         "metadata": {
             "display_phone_number": "15551231234",
-            "phone_number_id": "105329768849298",
+            "phone_number_id": phone_number_id,
         },
         "messages": [
             {
@@ -160,7 +162,11 @@ def test_webhook_verify_rejects_bad_token(monkeypatch):
 @pytest.mark.db
 def test_webhook_processes_inbound_text(db, monkeypatch):
     org = _org(db)
-    _integration(db, org)
+    # Unique phone_number_id per test: resolution must never collide with a
+    # leftover integration row from a previous (possibly killed) run, which
+    # would route the webhook into the wrong org.
+    pnid = f"105{uuid.uuid4().hex[:9]}"
+    _integration(db, org, phone_number_id=pnid)
     captured = {}
 
     def fake_execute_turn(db_, organization_id, user_id, conversation, user_message,
@@ -183,7 +189,7 @@ def test_webhook_processes_inbound_text(db, monkeypatch):
     )
 
     try:
-        result = receive_webhook(_webhook_payload(), db)
+        result = receive_webhook(_webhook_payload(phone_number_id=pnid), db)
         assert result["processed"] == 1
         assert result["errors"] == []
 
@@ -241,6 +247,33 @@ def test_webhook_processes_inbound_text(db, monkeypatch):
 
 
 @pytest.mark.db
+@pytest.mark.db
+def test_resolve_picks_deterministically_when_phone_is_claimed_twice(db):
+    """Two orgs claiming the same phone number resolve to one stable org.
+
+    Guards against the flakiness this file historically suffered from: a
+    leftover integration row (from a killed run) must never flip which org
+    receives the webhook between calls or runs.
+    """
+    from app.integrations.whatsapp.service import resolve_organization_id
+
+    org_a = _org(db)
+    org_b = _org(db)
+    pnid = f"105{uuid.uuid4().hex[:9]}"
+    _integration(db, org_a, phone_number_id=pnid)
+    _integration(db, org_b, phone_number_id=pnid)
+    try:
+        first = resolve_organization_id(db, pnid)
+        second = resolve_organization_id(db, pnid)
+        assert first is not None
+        assert first == second  # stable across calls
+        assert str(first) in {str(org_a.id), str(org_b.id)}
+    finally:
+        _teardown(db, org_a)
+        _teardown(db, org_b)
+
+
+@pytest.mark.db
 def test_webhook_without_integration_is_dropped(db):
     """A phone number with no connected integration is ignored (no leak)."""
     org = _org(db)
@@ -252,7 +285,12 @@ def test_webhook_without_integration_is_dropped(db):
     monkeypatch.setattr("app.ai.orchestrator.execute_turn", unexpected)
 
     try:
-        result = receive_webhook(_webhook_payload(), db)
+        # Random phone_number_id so this can never resolve to a leftover
+        # integration row from a previous run (which would silently process
+        # the message instead of dropping it).
+        result = receive_webhook(
+            _webhook_payload(phone_number_id=f"105{uuid.uuid4().hex[:9]}"), db
+        )
         assert result["processed"] == 0
 
         from app.models.whatsapp import WhatsAppContact
@@ -397,14 +435,15 @@ def test_webhook_conversation_is_reused_across_messages(db):
     )
 
     org = _org(db)
-    _integration(db, org)
+    pnid = f"105{uuid.uuid4().hex[:9]}"
+    _integration(db, org, phone_number_id=pnid)
 
     from app.models.ai_conversation import AIConversation
 
     try:
         receive_whatsapp = receive_webhook
-        receive_whatsapp(_webhook_payload(body="first"), db)
-        receive_whatsapp(_webhook_payload(body="second"), db)
+        receive_whatsapp(_webhook_payload(body="first", phone_number_id=pnid), db)
+        receive_whatsapp(_webhook_payload(body="second", phone_number_id=pnid), db)
 
         conversations = (
             db.query(AIConversation)

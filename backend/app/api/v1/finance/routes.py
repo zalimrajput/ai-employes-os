@@ -122,7 +122,11 @@ def mark_invoice_paid(
 
 
 @router.post("/invoices/stripe-webhook")
+@router.post("/finance/invoices/stripe-webhook")
 # Public endpoint: Stripe signs every payload; verified via the webhook secret.
+# The second path is a compat alias for webhooks registered before the route
+# moved to /invoices/stripe-webhook — both URLs work, so Stripe delivers
+# regardless of which one was saved in the dashboard.
 async def invoice_stripe_webhook(request: Request, db: Session = Depends(get_db)):
     """Handle a Stripe Checkout ``checkout.session.completed`` event.
 
@@ -156,7 +160,12 @@ async def invoice_stripe_webhook(request: Request, db: Session = Depends(get_db)
     event_type = event.get("type") if isinstance(event, dict) else event.type
     event_data = event.get("data", {}).get("object", {}) if isinstance(event, dict) else event.data.object
 
-    if event_type != "checkout.session.completed":
+    # Accepted payment-completion events. ``checkout.session.completed`` carries
+    # our org/invoice metadata directly on the session; ``invoice.paid`` /
+    # ``invoice.payment_succeeded`` resolve it through the PaymentIntent, which
+    # Stripe copies the Checkout Session metadata onto.
+    PAYMENT_EVENTS = {"checkout.session.completed", "invoice.paid", "invoice.payment_succeeded"}
+    if event_type not in PAYMENT_EVENTS:
         return {"received": True, "type": event_type, "applied": False}
 
     # StripeObject's public serialization method is to_dict(); convert metadata to
@@ -169,7 +178,20 @@ async def invoice_stripe_webhook(request: Request, db: Session = Depends(get_db)
         except Exception:
             return default
 
-    metadata = _get(event_data, "metadata", {})
+    if event_type == "checkout.session.completed":
+        metadata = _get(event_data, "metadata", {})
+    else:
+        metadata = {}
+        payment_intent = _get(event_data, "payment_intent")
+        if payment_intent:
+            try:
+                import stripe
+
+                stripe.api_key = settings.STRIPE_SECRET_KEY or ""
+                payment = stripe.PaymentIntent.retrieve(payment_intent)
+                metadata = getattr(payment, "metadata", None) or {}
+            except Exception:
+                metadata = {}
     if hasattr(metadata, "to_dict"):
         metadata = metadata.to_dict()
     if metadata is None:
