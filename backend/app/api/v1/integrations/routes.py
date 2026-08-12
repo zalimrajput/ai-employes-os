@@ -1,6 +1,7 @@
 import logging
 from secrets import token_urlsafe
 from urllib.parse import urlencode
+from uuid import UUID as UUIDType
 
 logger = logging.getLogger("app.api.v1.integrations")
 
@@ -10,7 +11,7 @@ from pydantic import BaseModel
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.api.v1._crud import crud_router, require_org_member
+from app.api.v1._crud import require_org_admin, require_org_member
 from app.core.auth import get_current_user
 from app.core.config import settings
 from app.core.database import get_db
@@ -18,11 +19,16 @@ from app.models.integration import Integration
 from app.services.integration_service import (
     OAUTH_PROVIDERS,
     build_authorize_url,
-    disconnect,
     exchange_code,
     get_provider_config,
     save_credentials,
 )
+
+# Credential fields that must NEVER be written through the generic CRUD-style
+# endpoints. Tokens/connection state can only be set by the provider-verified
+# flows (WhatsApp credentials endpoint, OAuth callback, env-key live check), so
+# a bad key can never mark a provider as Connected.
+_CREDENTIAL_FIELDS = {"access_token", "refresh_token", "connected"}
 
 
 router = APIRouter()
@@ -374,14 +380,149 @@ def save_whatsapp_credentials(
     }
 
 
-router.include_router(
-    crud_router(
-        Integration,
-        prefix="/integrations",
-        tags=["Integrations"],
-        search_fields=["provider"],
+class IntegrationWriteIn(BaseModel):
+    """Generic write payload for integration rows.
+
+    Credential fields are declared so they are parsed explicitly (never
+    silently dropped) and then rejected with a 400 by the handlers — nothing
+    can bypass the live provider verification done by the dedicated endpoints.
+    Any other unexpected field is refused by ``extra="forbid"``.
+    """
+
+    model_config = {"extra": "forbid"}
+
+    provider: str | None = None
+    metadata: dict | None = None
+    access_token: str | None = None
+    refresh_token: str | None = None
+    connected: bool | None = None
+
+
+class IntegrationOut(BaseModel):
+    """Integration row as seen by clients — tokens are NEVER serialized."""
+
+    id: str
+    provider: str
+    connected: bool
+    metadata: dict
+    created_at: str | None = None
+    updated_at: str | None = None
+
+
+@router.get("/integrations/", tags=["Integrations"])
+# Protected, org-scoped list. Unlike a generic CRUD list it never returns
+# access/refresh tokens — the UI must use /integrations/status for state.
+def integration_list(
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    me = require_org_member(db, current_user)
+    rows = (
+        db.query(Integration)
+        .filter(Integration.organization_id == me.organization_id)
+        .order_by(Integration.created_at.desc())
+        .all()
     )
-)
+    return [
+        IntegrationOut(
+            id=str(r.id),
+            provider=r.provider,
+            connected=bool(r.connected),
+            metadata=r.metadata_json or {},
+            created_at=r.created_at.isoformat() if r.created_at else None,
+            updated_at=r.updated_at.isoformat() if r.updated_at else None,
+        ).model_dump()
+        for r in rows
+    ]
+
+
+@router.post("/integrations/", tags=["Integrations"], status_code=400)
+# Rejected on purpose: credentials must go through the provider-verified
+# endpoints so a dummy key can never be stored as Connected.
+def integration_create(
+    payload: IntegrationWriteIn,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    require_org_member(db, current_user)
+    raise HTTPException(
+        status_code=400,
+        detail=(
+            "Credentials cannot be saved through the generic endpoint — "
+            "use the validated flows: WhatsApp → POST /integrations/whatsapp/credentials, "
+            "OAuth providers → /integrations/oauth/connect/{provider}, "
+            "env-key providers → /integrations/check/{provider}"
+        ),
+    )
+
+
+@router.patch("/integrations/{item_id}", tags=["Integrations"])
+def integration_update(
+    item_id: UUIDType,
+    payload: IntegrationWriteIn,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    me = require_org_member(db, current_user)
+    obj = (
+        db.query(Integration)
+        .filter(
+            Integration.id == item_id,
+            Integration.organization_id == me.organization_id,
+        )
+        .first()
+    )
+    if obj is None:
+        raise HTTPException(status_code=404, detail="Not found")
+    # Guard the credential columns explicitly: even a well-formed request that
+    # tries to sneak them through (regardless of the Pydantic model above)
+    # must fail loudly instead of bypassing live validation.
+    raw = payload.model_dump(exclude_unset=True)
+    if any(field in raw for field in _CREDENTIAL_FIELDS):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "access_token, refresh_token and connected are set only after "
+                "live provider verification — use the dedicated endpoints "
+                "(WhatsApp credentials, OAuth connect, or the env-key check)"
+            ),
+        )
+    require_org_admin(db, me.id, me.organization_id)
+    for key, value in payload.model_dump(exclude_unset=True).items():
+        setattr(obj, "metadata_json" if key == "metadata" else key, value)
+    db.commit()
+    db.refresh(obj)
+    return IntegrationOut(
+        id=str(obj.id),
+        provider=obj.provider,
+        connected=bool(obj.connected),
+        metadata=obj.metadata_json or {},
+        created_at=obj.created_at.isoformat() if obj.created_at else None,
+        updated_at=obj.updated_at.isoformat() if obj.updated_at else None,
+    ).model_dump()
+
+
+@router.delete("/integrations/{item_id}", tags=["Integrations"])
+def integration_delete(
+    item_id: UUIDType,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    me = require_org_member(db, current_user)
+    require_org_admin(db, me.id, me.organization_id)
+    obj = (
+        db.query(Integration)
+        .filter(
+            Integration.id == item_id,
+            Integration.organization_id == me.organization_id,
+        )
+        .first()
+    )
+    if obj is None:
+        raise HTTPException(status_code=404, detail="Not found")
+    db.delete(obj)
+    db.commit()
+    return {"id": str(item_id), "deleted": True}
 
 
 def _frontend_settings_url(provider: str, status: str, detail: str | None = None) -> str:

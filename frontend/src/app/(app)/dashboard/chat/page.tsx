@@ -159,8 +159,10 @@ function ChatPageInner() {
         {selected ? (
           <ChatInterface
             employeeName={selectedEmp?.name ?? "AI Employee"}
+            conversationTitle={selected.title ?? null}
             conversationId={selected.id}
             initialMessages={messages}
+            onNewChat={handleNewChat}
           />
         ) : (
           <div className="flex flex-1 flex-col items-center justify-center gap-4 text-center">

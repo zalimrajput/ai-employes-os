@@ -558,3 +558,206 @@ def test_oauth_callback_redirects_error_when_exchange_fails(db, monkeypatch):
     assert resp.status_code == 302
     assert "status=error" in resp.headers["location"]
     assert "provider=slack" in resp.headers["location"]
+
+
+def _auth_user(db, admin=False):
+    """Create an org + user and override auth; returns (org, user, teardown fn).
+
+    The trg_seed_default_roles DB trigger already seeds the org's default
+    roles (incl. Company Admin) on INSERT — reuse that row instead of
+    inserting a duplicate."""
+    from app.core.auth import get_current_user
+    from app.main import app
+    from app.models.organization import Organization
+    from app.models.role import Role
+    from app.models.user import User
+    from app.models.user_role import UserRole
+
+    db.rollback()  # clear any failed-transaction state from a prior test
+    org = Organization(name="Guard Org", slug=f"gu-{uuid.uuid4().hex[:10]}", settings={})
+    db.add(org)
+    db.commit()
+    db.refresh(org)
+    user = User(full_name="Tester", email=f"gu-{uuid.uuid4().hex[:6]}@t.co", organization_id=org.id)
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    if admin:
+        role = (
+            db.query(Role)
+            .filter(Role.organization_id == org.id, Role.name == "Company Admin")
+            .first()
+        )
+        if role is None:
+            role = Role(organization_id=org.id, name="Company Admin")
+            db.add(role)
+            db.commit()
+            db.refresh(role)
+        db.add(UserRole(user_id=user.id, role_id=role.id, organization_id=org.id))
+        db.commit()
+
+    app.dependency_overrides[get_current_user] = lambda: {"sub": str(user.id)}
+
+    def teardown():
+        from app.main import app as _app
+
+        _app.dependency_overrides.clear()
+        for stmt in (
+            "DELETE FROM user_roles WHERE organization_id = :id",
+            "DELETE FROM roles WHERE organization_id = :id",
+            "DELETE FROM users WHERE organization_id = :id",
+            "DELETE FROM organizations WHERE id = :id",
+        ):
+            db.execute(text(stmt), {"id": org.id})
+        db.commit()
+
+    return org, user, teardown
+
+
+def test_generic_integration_post_rejected(db):
+    """POST /api/v1/integrations/ must refuse to store credentials — a dummy
+    key with connected=true can never land in the table through the generic
+    endpoint (only the provider-verified flows may write credentials)."""
+    from fastapi.testclient import TestClient
+    from app.main import app
+    from app.models.integration import Integration
+
+    org, _, teardown = _auth_user(db)
+    try:
+        with TestClient(app) as client:
+            resp = client.post(
+                "/api/v1/integrations/",
+                json={
+                    "provider": "stripe",
+                    "access_token": "sk_test_dummy",
+                    "connected": True,
+                },
+            )
+        assert resp.status_code == 400
+        assert "validated" in resp.json()["detail"].lower()
+        assert (
+            db.query(Integration)
+            .filter(
+                Integration.organization_id == org.id,
+                Integration.provider == "stripe",
+            )
+            .first()
+            is None
+        )
+    finally:
+        teardown()
+
+
+def test_generic_integration_patch_rejects_credential_writes(db):
+    """PATCH /api/v1/integrations/{id} must reject any change to
+    access_token / refresh_token / connected with a 400 (they are only set
+    after live verification), while metadata-only updates still work."""
+    from fastapi.testclient import TestClient
+    from app.main import app
+    from app.models.integration import Integration
+
+    org, _, teardown = _auth_user(db, admin=True)
+    try:
+        row = Integration(
+            organization_id=org.id,
+            provider="gmail",
+            access_token="encrypted-at",
+            connected=False,
+            metadata_json={"kind": "oauth"},
+        )
+        db.add(row)
+        db.commit()
+        db.refresh(row)
+
+        with TestClient(app) as client:
+            resp = client.patch(
+                f"/api/v1/integrations/{row.id}",
+                json={"connected": True, "access_token": "sk_live_dummy"},
+            )
+        assert resp.status_code == 400
+        assert "live provider verification" in resp.json()["detail"]
+
+        db.expire_all()
+        untouched = db.query(Integration).filter(Integration.id == row.id).first()
+        assert untouched.connected is False
+        assert untouched.access_token == "encrypted-at"
+
+        # metadata-only updates remain allowed for org admins.
+        with TestClient(app) as client:
+            ok = client.patch(
+                f"/api/v1/integrations/{row.id}",
+                json={"metadata": {"kind": "oauth", "label": "work"}},
+            )
+        assert ok.status_code == 200
+        db.expire_all()
+        updated = db.query(Integration).filter(Integration.id == row.id).first()
+        assert updated.metadata_json.get("label") == "work"
+    finally:
+        teardown()
+
+
+def test_generic_integration_list_never_leaks_tokens(db):
+    """The generic integration list is org-scoped and must never serialize
+    access/refresh tokens — only the /status endpoint is meant for the UI."""
+    from fastapi.testclient import TestClient
+    from app.main import app
+    from app.models.integration import Integration
+
+    org, _, teardown = _auth_user(db)
+    try:
+        row = Integration(
+            organization_id=org.id,
+            provider="slack",
+            access_token="encrypted-at",
+            refresh_token="encrypted-rt",
+            connected=True,
+        )
+        db.add(row)
+        db.commit()
+
+        with TestClient(app) as client:
+            resp = client.get("/api/v1/integrations/")
+        assert resp.status_code == 200
+        rows = resp.json()
+        assert len(rows) == 1
+        assert rows[0]["provider"] == "slack"
+        assert rows[0]["connected"] is True
+        assert "access_token" not in rows[0]
+        assert "refresh_token" not in rows[0]
+    finally:
+        teardown()
+
+
+def test_generic_integration_delete_org_scoped(db):
+    """DELETE on an integration row is org-scoped: another org's row is
+    invisible (404), the caller's own row is removed for org admins."""
+    from fastapi.testclient import TestClient
+    from app.main import app
+    from app.models.integration import Integration
+    from app.models.organization import Organization
+
+    org, _, teardown = _auth_user(db, admin=True)
+    other = Organization(name="Other Org", slug=f"oo-{uuid.uuid4().hex[:10]}", settings={})
+    db.add(other)
+    db.commit()
+    db.refresh(other)
+    try:
+        mine = Integration(organization_id=org.id, provider="zoho", connected=False)
+        theirs = Integration(organization_id=other.id, provider="xero", connected=False)
+        db.add_all([mine, theirs])
+        db.commit()
+        db.refresh(mine)
+        db.refresh(theirs)
+
+        with TestClient(app) as client:
+            # Foreign org row: org-scoped query sees nothing -> 404.
+            resp_foreign = client.delete(f"/api/v1/integrations/{theirs.id}")
+            # Own row: deleted.
+            resp_own = client.delete(f"/api/v1/integrations/{mine.id}")
+        assert resp_foreign.status_code == 404
+        assert resp_own.status_code == 200
+        assert resp_own.json()["deleted"] is True
+        assert db.query(Integration).filter(Integration.id == theirs.id).first() is not None
+        assert db.query(Integration).filter(Integration.id == mine.id).first() is None
+    finally:
+        teardown()

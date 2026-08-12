@@ -58,13 +58,13 @@ def _provider_for(model: str) -> str:
 
 
 def _effective_provider(model: str, provider: str) -> str:
-    """Fall back to OpenRouter when the direct provider key is missing but
+    """Fall back to OpenRouter when the direct provider key is missing or invalid but
     OpenRouter is configured (common in demo/self-host setups)."""
     if not settings.OPENROUTER_API_KEY:
         return provider
     if provider == "openai" and not settings.OPENAI_API_KEY:
         return "openrouter"
-    if provider == "google" and not settings.GOOGLE_AI_KEY:
+    if provider == "google" and (not settings.GOOGLE_AI_KEY or not settings.GOOGLE_AI_KEY.startswith(("AIzaSy", "AQ."))):
         return "openrouter"
     return provider
 
@@ -89,10 +89,8 @@ def _is_retryable(exc: ModelRouterError) -> bool:
         return False
     if exc.status_code in _RETRYABLE_STATUS:
         return True
-    # An unknown model id (400/404 "model ... not found") would otherwise kill
-    # the whole chain before reaching the next fallback; treat it as retryable
-    # so a mistyped/unsupported model never blanks a turn.
-    if exc.status_code in (400, 404) and "model" in str(exc).lower():
+    # Model/Key/Quota errors (400, 401, 403, 404) should fall back to the next model
+    if exc.status_code in (400, 401, 403, 404):
         return True
     return False
 

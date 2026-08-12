@@ -609,6 +609,19 @@ def test_customer_cohort_report_aggregates_exact(db, monkeypatch):
         _activity(db, org, silent.id, _days_ago(50))      # prior-period only -> churn
         _activity(db, org, inactive.id, _days_ago(1))     # inactive, ignored
 
+        # DBG-BEGIN
+        from app.models.activity import Activity as _Act
+        db.expire_all()
+        _custs = db.query(Customer).filter(Customer.organization_id == org.id).all()
+        _acts = db.query(_Act).filter(_Act.organization_id == org.id).all()
+        print("\nDBG custs:", [(str(c.id), c.name) for c in _custs])
+        print("DBG acts:", [(str(a.entity_id), a.created_at.isoformat()) for a in _acts])
+        import app.ai.tools.reporting_tools as _rt
+        _s, _e = _rt._period_bounds("last_30_days")
+        _ids = {c.id for c in _custs}
+        print("DBG engaged set:", sorted(str(x) for x in ({a.entity_id for a in _acts if _s <= a.created_at <= _e} & _ids)))
+        # DBG-END
+
         result = REPORTING_TOOLS["generate_customer_cohort_report"].handler(
             db, org.id, None, {"period": "last_30_days"}
         )

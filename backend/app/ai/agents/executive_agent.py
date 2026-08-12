@@ -14,6 +14,7 @@ AGENT = AgentDefinition(
         "transcribe_meeting_audio",
         "search_knowledge",
         "get_document",
+        "send_email",
         "approve_quotation",
         "reject_quotation",
         "generate_revenue_report",
