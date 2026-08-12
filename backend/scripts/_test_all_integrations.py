@@ -60,20 +60,20 @@ def check_google_drive(db):
 
 
 def check_google_sheets(db):
-    # The sheets client exposes no list endpoint; validate the token + scope
-    # read-only via Google's tokeninfo (a 400 = invalid token).
-    row = _row(db, "google-sheets")
-    token = decrypt_value(row.access_token)
-    resp = httpx.get(
-        "https://www.googleapis.com/oauth2/v3/tokeninfo",
-        params={"access_token": token},
-        timeout=15,
-    )
-    if resp.status_code != 200:
-        raise RuntimeError(resp.text[:150])
-    data = resp.json()
-    scope_ok = "spreadsheets" in (data.get("scope") or "")
-    return f"token valid (spreadsheets scope={'granted' if scope_ok else 'MISSING'})"
+    # The sheets client exposes no list endpoint, so probe auth through the
+    # app's own client instead: a read against a fake spreadsheet id triggers
+    # the 401-refresh path and returns 404 when the credentials are valid
+    # ("fake doc not found"). A 401 here means the refresh failed.
+    from app.integrations.google_sheets.service import get_client
+
+    client = get_client(db, ORG_ID)
+    try:
+        client.read_sheet("__auth_probe__", "A1")
+    except RuntimeError as exc:
+        if "404" in str(exc):
+            return "token valid (auto-refresh works)"
+        raise
+    return "token valid"
 
 
 def check_outlook(db):
