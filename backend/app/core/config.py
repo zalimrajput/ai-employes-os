@@ -18,9 +18,12 @@ class Settings(BaseSettings):
     DATABASE_URL: str
 
     # ---------------------------------------------------------------- supabase
-    SUPABASE_URL: str
-    SUPABASE_ANON_KEY: str
-    SUPABASE_SERVICE_ROLE_KEY: str
+    # Empty defaults keep import-time Settings() from crashing in CI, where
+    # only DATABASE_URL is provided. Production always sets these via .env;
+    # the auth/user services fail per-request with a clear error if empty.
+    SUPABASE_URL: str = ""
+    SUPABASE_ANON_KEY: str = ""
+    SUPABASE_SERVICE_ROLE_KEY: str = ""
     SUPABASE_JWT_SECRET: str = ""
 
     # ---------------------------------------------------------------- jwt

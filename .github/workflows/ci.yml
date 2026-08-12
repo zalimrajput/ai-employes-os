@@ -26,6 +26,11 @@ jobs:
     env:
       DATABASE_URL: postgresql+psycopg2://postgres:postgres@localhost:5432/ai_employee_os
       REDIS_URL: redis://localhost:6379
+      # Dummy test-only secrets: encryption.py derives its Fernet key from
+      # ENCRYPTION_KEY (falling back to JWT_SECRET_KEY), so unit tests that
+      # persist tokens need a non-empty value. Never used in production.
+      JWT_SECRET_KEY: ci-test-secret-not-for-production
+      ENCRYPTION_KEY: ci-test-secret-not-for-production
     defaults:
       run:
         working-directory: backend

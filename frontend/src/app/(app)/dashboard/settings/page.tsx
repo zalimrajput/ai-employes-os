@@ -96,17 +96,19 @@ function oauthErrorHint(detail: string, provider: string): string {
 export default function SettingsPage() {
   const { data: session } = useSession();
   const queryClient = useQueryClient();
+  // After an OAuth round-trip the backend redirects here with
+  // ?tab=integrations&status=connected|error&provider=<name>. The tab switch is
+  // deferred past the first paint so the initial client render matches the
+  // server HTML (no hydration mismatch) while still satisfying the
+  // react-hooks/set-state-in-effect lint rule.
   const [tab, setTab] = useState("users");
   const [apiKey] = useState("sk-ai-os-••••••••••••••••••••");
 
-  // After an OAuth round-trip the backend redirects here with
-  // ?tab=integrations&status=connected|error&provider=<name>.
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const status = params.get("status");
     const provider = params.get("provider") ?? "";
     const errorDesc = params.get("error_description") ?? "";
-    if (params.get("tab") === "integrations" || status) setTab("integrations");
     if (status === "connected") {
       toast.success(`${PROVIDER_LABEL[provider] ?? provider} connected — your AI employees can use it now`);
     } else if (status === "error") {
@@ -118,6 +120,10 @@ export default function SettingsPage() {
       const url = new URL(window.location.href);
       url.search = "";
       window.history.replaceState({}, "", url.pathname);
+    }
+    if (params.get("tab") === "integrations" || status) {
+      const frame = requestAnimationFrame(() => setTab("integrations"));
+      return () => cancelAnimationFrame(frame);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
