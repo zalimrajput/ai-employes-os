@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { ArrowRight, Bot, CalendarClock, CheckCircle2, Clock, MessageSquare, Sparkles, Target } from "lucide-react";
+import { ArrowRight, Bot, CalendarClock, CheckCircle2, MessageSquare, Sparkles, Target } from "lucide-react";
 import Link from "next/link";
 import { DashboardHeader } from "@/components/dashboard/dashboard-header";
 import { ModuleWidgets } from "@/components/dashboard/module-widgets";
@@ -14,12 +14,6 @@ import { useSession } from "@/hooks/use-session";
 import { formatDate, formatTime, timeAgo } from "@/lib/utils";
 import { motion } from "framer-motion";
 
-const MY_DEADLINES = [
-  { title: "Finalize Q3 presentation", due: "2026-08-03", priority: "high" },
-  { title: "Submit expense report", due: "2026-08-04", priority: "medium" },
-  { title: "1:1 with Alex Morgan", due: "2026-08-05", priority: "low" },
-];
-
 export default function EmployeeDashboardPage() {
   const { data: session } = useSession();
   const { data: empData } = useQuery({ queryKey: ["ai-employees"], queryFn: fetchAIEmployees });
@@ -29,14 +23,14 @@ export default function EmployeeDashboardPage() {
     queryFn: fetchMeetings,
   });
 
-  const employees =
-    empData?.source === "db" || empData?.source === "demo" ? empData.items : [];
-  const tasks = taskData?.source === "db" || taskData?.source === "demo" ? taskData.items : [];
+  const employees = empData?.source === "db" ? empData.items : [];
+  const tasks = taskData?.source === "db" ? taskData.items : [];
   const myTasks = tasks.slice(0, 4);
-  const meetings =
-    meetingsData?.source === "db" || meetingsData?.source === "demo"
-      ? meetingsData.items
-      : [];
+  const completed = tasks.filter((t) => t.status === "done").length;
+  const deadlines = tasks
+    .filter((t) => t.due_date)
+    .slice(0, 4);
+  const meetings = meetingsData?.source === "db" ? meetingsData.items : [];
 
   return (
     <div className="space-y-8">
@@ -54,10 +48,9 @@ export default function EmployeeDashboardPage() {
       />
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <StatCard label="My Tasks" value={String(myTasks.length)} delta={2} icon={<Target className="h-5 w-5" />} gradient="from-primary to-secondary" loading={false} />
-        <StatCard label="Completed" value="24" delta={12} icon={<CheckCircle2 className="h-5 w-5" />} gradient="from-secondary to-accent" loading={false} />
-        <StatCard label="Meetings Today" value={meetingsLoading ? "—" : String(meetings.length)} delta={0} icon={<CalendarClock className="h-5 w-5" />} gradient="from-accent to-success" loading={meetingsLoading} />
-        <StatCard label="Focus Hours" value="6.5" delta={8} icon={<Clock className="h-5 w-5" />} gradient="from-warning to-danger" loading={false} />
+        <StatCard label="My Tasks" value={String(myTasks.length)} icon={<Target className="h-5 w-5" />} gradient="from-primary to-secondary" loading={!taskData} />
+        <StatCard label="Completed" value={String(completed)} icon={<CheckCircle2 className="h-5 w-5" />} gradient="from-secondary to-accent" loading={!taskData} />
+        <StatCard label="Meetings Today" value={meetingsLoading ? "—" : String(meetings.length)} icon={<CalendarClock className="h-5 w-5" />} gradient="from-accent to-success" loading={meetingsLoading} />
       </div>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
@@ -72,26 +65,30 @@ export default function EmployeeDashboardPage() {
             </Link>
           </CardHeader>
           <CardContent className="space-y-2">
-            {myTasks.map((t, i) => (
-              <motion.div
-                key={t.id}
-                initial={{ opacity: 0, y: 8 }}
-                whileInView={{ opacity: 1, y: 0 }}
-                viewport={{ once: true }}
-                transition={{ delay: i * 0.05 }}
-                whileHover={{ x: 4 }}
-                className="flex items-center gap-3 rounded-xl border border-border-soft bg-card-soft/40 p-3"
-              >
-                <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: PRIORITY_COLORS[t.priority ?? "medium"] }} />
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-semibold text-slate-100">{t.title}</p>
-                  <p className="text-xs text-slate-500">{t.description ?? "No description"} · {timeAgo(t.due_date ?? t.created_at)}</p>
-                </div>
-                <Badge variant={t.status === "done" ? "success" : t.status === "in_progress" ? "accent" : "secondary"}>
-                  {t.status?.replace("_", " ")}
-                </Badge>
-              </motion.div>
-            ))}
+            {myTasks.length === 0 ? (
+              <p className="text-sm text-slate-500">No tasks assigned yet.</p>
+            ) : (
+              myTasks.map((t, i) => (
+                <motion.div
+                  key={t.id}
+                  initial={{ opacity: 0, y: 8 }}
+                  whileInView={{ opacity: 1, y: 0 }}
+                  viewport={{ once: true }}
+                  transition={{ delay: i * 0.05 }}
+                  whileHover={{ x: 4 }}
+                  className="flex items-center gap-3 rounded-xl border border-border-soft bg-card-soft/40 p-3"
+                >
+                  <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: PRIORITY_COLORS[t.priority ?? "medium"] }} />
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-semibold text-slate-100">{t.title}</p>
+                    <p className="text-xs text-slate-500">{t.description ?? "No description"} · {timeAgo(t.due_date ?? t.created_at)}</p>
+                  </div>
+                  <Badge variant={t.status === "done" ? "success" : t.status === "in_progress" ? "accent" : "secondary"}>
+                    {t.status?.replace("_", " ")}
+                  </Badge>
+                </motion.div>
+              ))
+            )}
           </CardContent>
         </Card>
 
@@ -127,7 +124,7 @@ export default function EmployeeDashboardPage() {
         </Card>
       </div>
 
-      {/* My deadlines */}
+      {/* Upcoming deadlines — live tasks with due dates */}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         <Card>
           <CardHeader>
@@ -135,23 +132,27 @@ export default function EmployeeDashboardPage() {
             <CardDescription>Next due dates on your plate</CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
-            {MY_DEADLINES.map((d, i) => (
-              <motion.div
-                key={d.title}
-                initial={{ opacity: 0, y: 8 }}
-                whileInView={{ opacity: 1, y: 0 }}
-                viewport={{ once: true }}
-                transition={{ delay: i * 0.05 }}
-                whileHover={{ y: -3 }}
-                className="rounded-xl border border-border-soft bg-card-soft/40 p-4"
-              >
-                <div className="flex items-center justify-between gap-2">
-                  <p className="text-sm font-bold text-white">{d.title}</p>
-                  <Badge variant={d.priority === "high" ? "danger" : d.priority === "medium" ? "warning" : "secondary"}>{d.priority}</Badge>
-                </div>
-                <p className="mt-1 text-xs text-slate-500">Due {formatDate(d.due)}</p>
-              </motion.div>
-            ))}
+            {deadlines.length === 0 ? (
+              <p className="text-sm text-slate-500">No deadlines coming up.</p>
+            ) : (
+              deadlines.map((d, i) => (
+                <motion.div
+                  key={d.id}
+                  initial={{ opacity: 0, y: 8 }}
+                  whileInView={{ opacity: 1, y: 0 }}
+                  viewport={{ once: true }}
+                  transition={{ delay: i * 0.05 }}
+                  whileHover={{ y: -3 }}
+                  className="rounded-xl border border-border-soft bg-card-soft/40 p-4"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-sm font-bold text-white">{d.title}</p>
+                    <Badge variant={d.priority === "high" ? "danger" : d.priority === "medium" ? "warning" : "secondary"}>{d.priority ?? "low"}</Badge>
+                  </div>
+                  <p className="mt-1 text-xs text-slate-500">Due {formatDate(d.due_date)}</p>
+                </motion.div>
+              ))
+            )}
           </CardContent>
         </Card>
 

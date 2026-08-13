@@ -1,42 +1,31 @@
 "use client";
 
+import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { Check, Crown, Rocket, Zap } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { motion } from "framer-motion";
+import { fetchPlans } from "@/services/business";
 
-const PLANS = [
-  {
-    name: "Basic",
-    price: 19,
-    icon: Zap,
-    desc: "For freelancers and solo entrepreneurs.",
-    features: ["1 user", "500 AI requests/mo", "Email drafting", "100 invoices & quotations", "Basic CRM & reports", "1 GB storage", "Email support"],
-    highlight: false,
-  },
-  {
-    name: "Pro",
-    price: 49,
-    icon: Rocket,
-    desc: "For small businesses and growing teams.",
-    features: ["Up to 5 users", "10,000 AI requests/mo", "Advanced CRM", "WhatsApp automation", "Meeting summaries & tasks", "Workflow automation", "20 GB storage", "Priority support"],
-    highlight: true,
-  },
-  {
-    name: "Business",
-    price: 149,
-    icon: Crown,
-    desc: "For medium and large organizations.",
-    features: ["Unlimited users (fair use)", "Multiple AI employees", "Department permissions", "API access & ERP integrations", "Advanced analytics & audit logs", "SSO", "200 GB storage", "Dedicated account manager"],
-    highlight: false,
-  },
-];
+const ICONS = [Zap, Rocket, Crown];
+
+function formatCount(n: number | null | undefined): string {
+  if (n == null) return "Unlimited";
+  if (n >= 1000) return `${(n / 1000).toFixed(n % 1000 === 0 ? 0 : 1)}k`;
+  return String(n);
+}
 
 export default function BillingPage() {
-  const [selected, setSelected] = useState("Pro");
+  const { data, isLoading } = useQuery({ queryKey: ["plans"], queryFn: fetchPlans });
+  const plans = data?.source === "db" ? data.items : [];
+  const [selected, setSelected] = useState<string | null>(null);
+
+  const activePlans = plans.filter((p) => p.active !== false);
+  const highlightIndex = activePlans.length > 2 ? 1 : -1;
 
   return (
     <div className="space-y-8">
@@ -48,58 +37,74 @@ export default function BillingPage() {
         </p>
       </div>
 
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-        {PLANS.map((plan, i) => {
-          const Icon = plan.icon;
-          const isSelected = selected === plan.name;
-          return (
-            <motion.div
-              key={plan.name}
-              initial={{ opacity: 0, y: 24 }}
-              whileInView={{ opacity: 1, y: 0 }}
-              viewport={{ once: true }}
-              transition={{ delay: i * 0.1 }}
-              whileHover={{ y: -8 }}
-              onClick={() => setSelected(plan.name)}
-              className={cn(
-                "cursor-pointer rounded-2xl p-[1px] transition-all",
-                plan.highlight ? "gradient-border" : "border border-border-soft"
-              )}
-            >
-              <div className={cn("relative rounded-2xl bg-card p-6 h-full", isSelected && "ring-2 ring-primary/50")}>
-                {plan.highlight && (
-                  <Badge variant="default" className="absolute -top-3 left-1/2 -translate-x-1/2">Most popular</Badge>
+      {isLoading ? (
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+          {[1, 2, 3].map((i) => <Skeleton key={i} className="h-96" />)}
+        </div>
+      ) : activePlans.length === 0 ? (
+        <p className="text-center text-sm text-slate-500">No plans published yet.</p>
+      ) : (
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+          {activePlans.map((plan, i) => {
+            const Icon = ICONS[i % ICONS.length];
+            const highlight = i === highlightIndex;
+            const isSelected = selected === plan.id;
+            const features = [
+              plan.max_users != null ? `Up to ${plan.max_users} user${plan.max_users === 1 ? "" : "s"}` : "Unlimited users",
+              `${formatCount(plan.ai_requests_limit)} AI requests/mo`,
+              `${plan.storage_limit_gb ?? 0} GB storage`,
+            ];
+            return (
+              <motion.div
+                key={plan.id}
+                initial={{ opacity: 0, y: 24 }}
+                whileInView={{ opacity: 1, y: 0 }}
+                viewport={{ once: true }}
+                transition={{ delay: i * 0.1 }}
+                whileHover={{ y: -8 }}
+                onClick={() => setSelected(plan.id)}
+                className={cn(
+                  "cursor-pointer rounded-2xl p-[1px] transition-all",
+                  highlight ? "gradient-border" : "border border-border-soft"
                 )}
-                <div className="flex items-center gap-2.5">
-                  <div className={cn("flex h-10 w-10 items-center justify-center rounded-xl", plan.highlight ? "bg-gradient-to-br from-primary to-secondary" : "bg-card-soft")}>
-                    <Icon className={cn("h-5 w-5", plan.highlight ? "text-white" : "text-primary-soft")} />
+              >
+                <div className={cn("relative rounded-2xl bg-card p-6 h-full", isSelected && "ring-2 ring-primary/50")}>
+                  {highlight && (
+                    <Badge variant="default" className="absolute -top-3 left-1/2 -translate-x-1/2">Most popular</Badge>
+                  )}
+                  <div className="flex items-center gap-2.5">
+                    <div className={cn("flex h-10 w-10 items-center justify-center rounded-xl", highlight ? "bg-gradient-to-br from-primary to-secondary" : "bg-card-soft")}>
+                      <Icon className={cn("h-5 w-5", highlight ? "text-white" : "text-primary-soft")} />
+                    </div>
+                    <h3 className="text-lg font-bold text-white">{plan.name}</h3>
                   </div>
-                  <h3 className="text-lg font-bold text-white">{plan.name}</h3>
+                  <p className="mt-2 text-sm text-slate-400">{plan.description ?? "—"}</p>
+                  <div className="mt-4 flex items-baseline gap-1">
+                    <span className="text-4xl font-bold tracking-tight text-white">
+                      ${plan.price_monthly ?? 0}
+                    </span>
+                    <span className="text-sm text-slate-500">/month</span>
+                  </div>
+                  <ul className="mt-6 space-y-2.5">
+                    {features.map((f) => (
+                      <li key={f} className="flex items-center gap-2 text-sm text-slate-300">
+                        <Check className="h-4 w-4 shrink-0 text-success" /> {f}
+                      </li>
+                    ))}
+                  </ul>
+                  <Button
+                    variant={highlight ? "default" : "secondary"}
+                    className="mt-6 w-full"
+                    onClick={() => toast.info(`${plan.name} plan selected — checkout opens with Stripe.`)}
+                  >
+                    {isSelected ? "Current plan" : `Choose ${plan.name}`}
+                  </Button>
                 </div>
-                <p className="mt-2 text-sm text-slate-400">{plan.desc}</p>
-                <div className="mt-4 flex items-baseline gap-1">
-                  <span className="text-4xl font-bold tracking-tight text-white">${plan.price}</span>
-                  <span className="text-sm text-slate-500">/month</span>
-                </div>
-                <ul className="mt-6 space-y-2.5">
-                  {plan.features.map((f) => (
-                    <li key={f} className="flex items-center gap-2 text-sm text-slate-300">
-                      <Check className="h-4 w-4 shrink-0 text-success" /> {f}
-                    </li>
-                  ))}
-                </ul>
-                <Button
-                  variant={plan.highlight ? "default" : "secondary"}
-                  className="mt-6 w-full"
-                  onClick={() => toast.info(`${plan.name} plan selected — checkout opens with Stripe.`)}
-                >
-                  {isSelected ? "Current plan" : `Choose ${plan.name}`}
-                </Button>
-              </div>
-            </motion.div>
-          );
-        })}
-      </div>
+              </motion.div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }

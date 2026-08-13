@@ -1,36 +1,31 @@
 "use client";
 
-import { ArrowRight, Clock, Headset, Mail, MessageCircle, ThumbsUp, Zap } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
+import { ArrowRight, Headset, Mail, MessageCircle } from "lucide-react";
 import Link from "next/link";
 import { DashboardHeader } from "@/components/dashboard/dashboard-header";
 import { ModuleWidgets } from "@/components/dashboard/module-widgets";
 import { StatCard } from "@/components/dashboard/stat-card";
-import { TasksChart, UsageBars } from "@/components/dashboard/charts";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Skeleton } from "@/components/ui/skeleton";
 import { timeAgo } from "@/lib/utils";
+import { fetchEmailThreads, fetchWhatsappMessages } from "@/services/business";
 import { motion } from "framer-motion";
 
-const TICKETS = [
-  { id: "TK-2041", subject: "Invoice #1042 not received", channel: "Email", priority: "High", status: "Open", time: "2026-07-31T09:14:00Z" },
-  { id: "TK-2040", subject: "Can I get a demo of the API?", channel: "WhatsApp", priority: "Medium", status: "In progress", time: "2026-07-31T08:02:00Z" },
-  { id: "TK-2039", subject: "Billing question — plan upgrade", channel: "Email", priority: "Low", status: "Resolved", time: "2026-07-31T06:41:00Z" },
-  { id: "TK-2038", subject: "Login issue on mobile", channel: "WhatsApp", priority: "High", status: "Open", time: "2026-07-31T05:55:00Z" },
-];
-
-const CHANNELS = [
-  { name: "Email", value: 412 },
-  { name: "WhatsApp", value: 286 },
-  { name: "Live chat", value: 154 },
-];
-
 export default function SupportDashboardPage() {
+  const { data: threadsData, isLoading: threadsLoading } = useQuery({ queryKey: ["email-threads"], queryFn: fetchEmailThreads });
+  const { data: whatsappData, isLoading: whatsappLoading } = useQuery({ queryKey: ["whatsapp-messages"], queryFn: fetchWhatsappMessages });
+
+  const threads = threadsData?.source === "db" ? threadsData.items : [];
+  const whatsappMessages = whatsappData?.source === "db" ? whatsappData.items : [];
+
   return (
     <div className="space-y-8">
       <DashboardHeader
         eyebrow="Customer care"
         title="Customer Support Dashboard"
-        description="Tickets, email and WhatsApp volume, response times, and customer satisfaction."
+        description="Email threads and WhatsApp activity handled by your support team."
         icon={Headset}
         gradient="from-accent to-success"
         actions={
@@ -41,59 +36,91 @@ export default function SupportDashboardPage() {
       />
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <StatCard label="Open Tickets" value="23" delta={-6} icon={<Headset className="h-5 w-5" />} gradient="from-primary to-secondary" loading={false} />
-        <StatCard label="Avg. First Response" value="1.8 min" delta={22} icon={<Zap className="h-5 w-5" />} gradient="from-secondary to-accent" loading={false} />
-        <StatCard label="CSAT Score" value="4.7 / 5" delta={3} icon={<ThumbsUp className="h-5 w-5" />} gradient="from-accent to-success" loading={false} />
-        <StatCard label="Avg. Resolution" value="4.2 hrs" delta={12} icon={<Clock className="h-5 w-5" />} gradient="from-success to-accent" loading={false} />
+        <StatCard label="Email Threads" value={String(threads.length)} icon={<Mail className="h-5 w-5" />} gradient="from-primary to-secondary" loading={threadsLoading} />
+        <StatCard label="WhatsApp Messages" value={String(whatsappMessages.length)} icon={<MessageCircle className="h-5 w-5" />} gradient="from-secondary to-accent" loading={whatsappLoading} />
+        <StatCard label="AI-Generated Replies" value={String(whatsappMessages.filter((m) => m.ai_generated).length)} icon={<Headset className="h-5 w-5" />} gradient="from-accent to-success" loading={whatsappLoading} />
       </div>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+        {/* Email queue — live from the backend */}
         <Card>
           <CardHeader>
-            <CardTitle>Support queue</CardTitle>
-            <CardDescription>Latest tickets across email and WhatsApp</CardDescription>
+            <CardTitle>Email threads</CardTitle>
+            <CardDescription>Latest customer conversations</CardDescription>
           </CardHeader>
           <CardContent className="space-y-2">
-            {TICKETS.map((t, i) => (
-              <motion.div
-                key={t.id}
-                initial={{ opacity: 0, x: -10 }}
-                whileInView={{ opacity: 1, x: 0 }}
-                viewport={{ once: true }}
-                transition={{ delay: i * 0.05 }}
-                whileHover={{ x: 4 }}
-                className="flex items-center gap-3 rounded-xl border border-border-soft bg-card-soft/40 p-3"
-              >
-                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-card-soft">
-                  {t.channel === "WhatsApp" ? <MessageCircle className="h-4 w-4 text-cyan-400" /> : <Mail className="h-4 w-4 text-primary-soft" />}
-                </div>
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-bold text-white">{t.subject}</p>
-                  <p className="text-xs text-slate-500">{t.id} · {t.channel} · {timeAgo(t.time)}</p>
-                </div>
-                <Badge variant={t.priority === "High" ? "danger" : t.priority === "Medium" ? "warning" : "secondary"}>{t.priority}</Badge>
-                <Badge variant={t.status === "Resolved" ? "success" : t.status === "In progress" ? "accent" : "default"}>{t.status}</Badge>
-              </motion.div>
-            ))}
+            {threadsLoading ? (
+              <div className="space-y-2">{[1, 2, 3].map((i) => <Skeleton key={i} className="h-14" />)}</div>
+            ) : threads.length === 0 ? (
+              <p className="text-sm text-slate-500">No email threads yet.</p>
+            ) : (
+              threads.slice(0, 6).map((t, i) => (
+                <motion.div
+                  key={t.id}
+                  initial={{ opacity: 0, x: -10 }}
+                  whileInView={{ opacity: 1, x: 0 }}
+                  viewport={{ once: true }}
+                  transition={{ delay: i * 0.05 }}
+                  whileHover={{ x: 4 }}
+                  className="flex items-center gap-3 rounded-xl border border-border-soft bg-card-soft/40 p-3"
+                >
+                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-card-soft">
+                    <Mail className="h-4 w-4 text-primary-soft" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-bold text-white">{t.subject ?? "Untitled thread"}</p>
+                    <p className="text-xs text-slate-500">
+                      {t.category ?? t.ai_priority ?? "inbox"}{t.created_at ? ` · ${timeAgo(t.created_at)}` : ""}
+                    </p>
+                  </div>
+                  <Badge variant={t.ai_priority === "high" ? "danger" : t.ai_priority === "urgent" ? "danger" : "secondary"}>
+                    {t.ai_priority ?? "normal"}
+                  </Badge>
+                </motion.div>
+              ))
+            )}
           </CardContent>
         </Card>
 
-        <div className="space-y-6">
-          <Card>
-            <CardHeader>
-              <CardTitle>Volume by channel</CardTitle>
-              <CardDescription>Conversations handled this week</CardDescription>
-            </CardHeader>
-            <CardContent><UsageBars data={CHANNELS} /></CardContent>
-          </Card>
-          <Card>
-            <CardHeader>
-              <CardTitle>Tickets per day</CardTitle>
-              <CardDescription>Inbound support volume</CardDescription>
-            </CardHeader>
-            <CardContent><TasksChart /></CardContent>
-          </Card>
-        </div>
+        {/* WhatsApp activity — live from the backend */}
+        <Card>
+          <CardHeader>
+            <CardTitle>WhatsApp activity</CardTitle>
+            <CardDescription>Latest messages across your WhatsApp line</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {whatsappLoading ? (
+              <div className="space-y-2">{[1, 2, 3].map((i) => <Skeleton key={i} className="h-14" />)}</div>
+            ) : whatsappMessages.length === 0 ? (
+              <p className="text-sm text-slate-500">No WhatsApp messages yet.</p>
+            ) : (
+              whatsappMessages.slice(0, 6).map((m, i) => (
+                <motion.div
+                  key={m.id}
+                  initial={{ opacity: 0, x: -10 }}
+                  whileInView={{ opacity: 1, x: 0 }}
+                  viewport={{ once: true }}
+                  transition={{ delay: i * 0.05 }}
+                  whileHover={{ x: 4 }}
+                  className="flex items-center gap-3 rounded-xl border border-border-soft bg-card-soft/40 p-3"
+                >
+                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-card-soft">
+                    <MessageCircle className="h-4 w-4 text-cyan-400" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-bold text-white">{m.message ?? "—"}</p>
+                    <p className="text-xs text-slate-500">
+                      {m.direction ?? "—"}{m.created_at ? ` · ${timeAgo(m.created_at)}` : ""}
+                    </p>
+                  </div>
+                  <Badge variant={m.direction === "inbound" ? "default" : m.ai_generated ? "accent" : "secondary"}>
+                    {m.ai_generated ? "AI" : m.direction ?? "—"}
+                  </Badge>
+                </motion.div>
+              ))
+            )}
+          </CardContent>
+        </Card>
       </div>
 
       {/* Module widgets — gated by the org's enabled modules */}

@@ -15,6 +15,7 @@ from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 
 from app.models.base import Base
+from app.core.config import settings
 
 
 
@@ -54,9 +55,11 @@ class AIEmployee(Base):
     description = Column(Text)
 
 
+    # Default to the deployment's configured model (Gemini in .env) instead of
+    # hardcoding an OpenAI id the deployment may not have a key for.
     model = Column(
         Text,
-        default="gpt-5"
+        default=settings.DEFAULT_AI_MODEL
     )
 
 

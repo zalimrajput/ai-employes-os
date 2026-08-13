@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Building2,
@@ -97,7 +98,7 @@ export default function SettingsPage() {
   // server HTML (no hydration mismatch) while still satisfying the
   // react-hooks/set-state-in-effect lint rule.
   const [tab, setTab] = useState("users");
-  const [apiKey] = useState("sk-ai-os-••••••••••••••••••••");
+  const [apiKey, setApiKey] = useState("");
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -142,6 +143,7 @@ export default function SettingsPage() {
   const myOrgId = session?.user?.orgId;
 
   function copyKey() {
+    if (!apiKey) return;
     navigator.clipboard?.writeText(apiKey).catch(() => {});
     toast.success("API key copied");
   }
@@ -266,19 +268,19 @@ export default function SettingsPage() {
               <div className="grid gap-4 sm:grid-cols-2">
                 <div className="space-y-2">
                   <Label>Company name</Label>
-                  <Input defaultValue={session?.user?.orgName ?? "Acme Inc."} />
+                  <Input defaultValue={session?.user?.orgName ?? ""} placeholder="Company name" />
                 </div>
                 <div className="space-y-2">
                   <Label>Industry</Label>
-                  <Input defaultValue="Technology" />
+                  <Input placeholder="e.g. Technology" />
                 </div>
                 <div className="space-y-2">
                   <Label>Country</Label>
-                  <Input defaultValue="United States" />
+                  <Input placeholder="e.g. United States" />
                 </div>
                 <div className="space-y-2">
                   <Label>Timezone</Label>
-                  <Input defaultValue="UTC-05:00 (EST)" />
+                  <Input placeholder="e.g. UTC-05:00 (EST)" />
                 </div>
               </div>
               <Button onClick={() => toast.success("Workspace settings saved")}>
@@ -320,13 +322,22 @@ export default function SettingsPage() {
               <CardDescription>Programmatic access for ERP integrations and custom workflows.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="flex items-center gap-2">
-                <Input value={apiKey} readOnly className="font-mono" />
-                <Button variant="secondary" size="icon" onClick={copyKey} aria-label="Copy key">
-                  <Copy className="h-4 w-4" />
-                </Button>
-              </div>
-              <Button onClick={() => toast.success("New API key generated")}>
+              {apiKey ? (
+                <div className="flex items-center gap-2">
+                  <Input value={apiKey} readOnly className="font-mono" />
+                  <Button variant="secondary" size="icon" onClick={copyKey} aria-label="Copy key">
+                    <Copy className="h-4 w-4" />
+                  </Button>
+                </div>
+              ) : (
+                <p className="text-sm text-slate-500">No API key generated yet.</p>
+              )}
+              <Button
+                onClick={() => {
+                  setApiKey(`sk-ai-os-${crypto.randomUUID?.().slice(0, 8) ?? Date.now().toString(36)}`);
+                  toast.success("API key generated");
+                }}
+              >
                 <KeyRound className="h-4 w-4" /> Generate new key
               </Button>
             </CardContent>
@@ -340,21 +351,12 @@ export default function SettingsPage() {
               <CardDescription>Your current plan and usage.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="gradient-border rounded-2xl p-[1px]">
-                <div className="rounded-2xl bg-card p-5">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-sm font-bold text-white">Pro Plan</p>
-                      <p className="text-xs text-slate-500">$49/month · 5 users · 10,000 AI requests</p>
-                    </div>
-                    <Badge variant="accent">Current</Badge>
-                  </div>
-                </div>
-              </div>
-              <div className="flex gap-2">
-                <Button onClick={() => toast.info("Opening Stripe checkout…")}>Upgrade to Business</Button>
-                <Button variant="secondary" onClick={() => toast.info("Usage report coming soon")}>View usage</Button>
-              </div>
+              <p className="text-sm text-slate-500">
+                Your plan and subscription details are managed on the Billing page.
+              </p>
+              <Link href="/dashboard/billing">
+                <Button><CreditCard className="h-4 w-4" /> View plans & billing</Button>
+              </Link>
             </CardContent>
           </>
         )}

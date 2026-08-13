@@ -7,7 +7,7 @@ import { useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ChatInterface } from "@/components/ai/chat-interface";
-import { fetchAIEmployees, fetchConversations, fetchMessages, createConversation, DEMO_MESSAGES } from "@/services/data";
+import { fetchAIEmployees, fetchConversations, fetchMessages, createConversation } from "@/services/data";
 import { employeeForAgent, agentDisplayName, agentForRoles } from "@/lib/agents";
 import { cn, timeAgo } from "@/lib/utils";
 import { useSession } from "@/hooks/use-session";
@@ -71,8 +71,8 @@ function ChatPageInner() {
     },
   });
 
-  const conversations = convData?.source === "db" || convData?.source === "demo" ? convData.items : [];
-  const employees = empData?.source === "db" || empData?.source === "demo" ? empData.items : [];
+  const conversations = convData?.source === "db" ? convData.items : [];
+  const employees = empData?.source === "db" ? empData.items : [];
   const selected = conversations.find((c) => c.id === activeId) ?? conversations[0];
   const selectedEmp = employees.find((e) => e.id === selected?.ai_employee_id);
   // Agent requested by the landing dashboard (e.g. ?agent=sales), if any.
@@ -85,23 +85,11 @@ function ChatPageInner() {
 
   const { data: msgData } = useQuery({
     queryKey: ["messages", selected?.id],
-    queryFn: () => (selected ? fetchMessages(selected.id) : Promise.resolve({ source: "demo" as const, items: DEMO_MESSAGES })),
+    queryFn: () => (selected ? fetchMessages(selected.id) : Promise.resolve({ source: "db" as const, items: [] })),
     enabled: !!selected,
   });
 
-  // Demo threads show curated rows; real conversations use their own messages
-  // and must never fall back to fake demo content, even on error.
-  const isDemoThread = selected?.id.startsWith("demo-") ?? false;
-  const messages =
-    msgData?.source === "db"
-      ? msgData.items
-      : msgData?.source === "demo"
-        ? isDemoThread
-          ? msgData.items
-          : []
-        : isDemoThread
-          ? DEMO_MESSAGES
-          : [];
+  const messages = msgData?.source === "db" ? msgData.items : [];
 
   function handleNewChat() {
     createMutation.mutate();

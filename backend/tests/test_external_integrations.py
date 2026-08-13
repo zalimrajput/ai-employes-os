@@ -36,6 +36,7 @@ def _teardown(db, org):
 
     for stmt in (
         "DELETE FROM leads WHERE organization_id = :id",
+        "DELETE FROM customers WHERE organization_id = :id",
         "DELETE FROM invoices WHERE organization_id = :id",
         "DELETE FROM invoice_items WHERE organization_id = :id",
         "DELETE FROM integrations WHERE organization_id = :id",
@@ -68,6 +69,44 @@ def test_zoho_create_lead_success(monkeypatch):
     assert method == "POST" and url.endswith("/crm/v2/Leads")
     assert payload["data"][0]["Last_Name"] == "Smith"
     assert payload["data"][0]["First_Name"] == "John"
+
+
+def test_zoho_create_customer_success(monkeypatch):
+    from app.integrations.zoho.client import ZohoCRMClient
+
+    calls = []
+
+    def fake_request(method, url, **kwargs):
+        calls.append((method, url, kwargs.get("json")))
+        return FakeResp(200, {"data": [{"id": "zcontact-1", "Last_Name": "Acme"}]})
+
+    monkeypatch.setattr("app.integrations.zoho.client.httpx.request", fake_request)
+    client = ZohoCRMClient(db=None, organization_id="org", access_token="tok")
+    result = client.create_customer(
+        name="Acme Corp", company="Acme", email="john@acme.com", phone="555"
+    )
+    assert result["created"] is True
+    assert result["contact_id"] == "zcontact-1"
+    method, url, payload = calls[0]
+    assert method == "POST" and url.endswith("/crm/v2/Contacts")
+    assert payload["data"][0]["First_Name"] == "Acme"
+    assert payload["data"][0]["Last_Name"] == "Corp"
+    assert payload["data"][0]["Account_Name"] == "Acme"
+
+
+def test_zoho_create_customer_single_word_name(monkeypatch):
+    from app.integrations.zoho.client import ZohoCRMClient
+
+    calls = []
+
+    def fake_request(method, url, **kwargs):
+        calls.append(kwargs.get("json"))
+        return FakeResp(200, {"data": [{"id": "zc2"}]})
+
+    monkeypatch.setattr("app.integrations.zoho.client.httpx.request", fake_request)
+    client = ZohoCRMClient(db=None, organization_id="org", access_token="tok")
+    client.create_customer(name="Acme")
+    assert calls[0]["data"][0] == {"Last_Name": "Acme"}
 
 
 def test_zoho_refresh_then_retry(monkeypatch):
@@ -566,6 +605,72 @@ def test_zoho_create_lead_tool_without_connection_still_saves(db, monkeypatch):
         _teardown(db, org)
 
 
+def test_zoho_create_customer_tool_syncs_when_connected(db, monkeypatch):
+    from app.ai.tools.integration_tools import INTEGRATION_TOOLS
+    from app.models.customer import Customer
+
+    org = _org(db)
+    try:
+        class FakeZoho:
+            def create_customer(self, **kwargs):
+                return {"created": True, "contact_id": "zc-777", "Last_Name": kwargs["name"]}
+
+        monkeypatch.setattr(
+            "app.integrations.zoho.service.get_client", lambda db_, oid: FakeZoho()
+        )
+        result = INTEGRATION_TOOLS["zoho_create_customer"].handler(
+            db,
+            org.id,
+            None,
+            {"name": "Acme Corp", "email": "john@acme.io", "company": "Acme"},
+        )
+        assert result["synced_to"] == "internal+zoho"
+        assert result["zoho"]["contact_id"] == "zc-777"
+        customer = db.query(Customer).filter(Customer.organization_id == org.id).first()
+        assert customer is not None
+        assert customer.name == "Acme Corp"
+        assert customer.email == "john@acme.io"
+    finally:
+        _teardown(db, org)
+
+
+def test_zoho_create_customer_tool_without_connection_still_saves(db, monkeypatch):
+    from app.ai.tools.integration_tools import INTEGRATION_TOOLS
+    from app.integrations.gmail.client import IntegrationNotConnectedError
+    from app.models.customer import Customer
+
+    org = _org(db)
+    try:
+
+        def raise_not_connected(db_, oid):
+            raise IntegrationNotConnectedError("not connected")
+
+        monkeypatch.setattr(
+            "app.integrations.zoho.service.get_client", raise_not_connected
+        )
+        result = INTEGRATION_TOOLS["zoho_create_customer"].handler(
+            db, org.id, None, {"name": "GlobalTech"}
+        )
+        assert result["synced_to"] == "internal"
+        assert "error" in result["zoho"]
+        assert db.query(Customer).filter(Customer.organization_id == org.id).count() == 1
+    finally:
+        _teardown(db, org)
+
+
+def test_zoho_create_customer_tool_requires_name(db):
+    from app.ai.tools.integration_tools import INTEGRATION_TOOLS
+
+    org = _org(db)
+    try:
+        result = INTEGRATION_TOOLS["zoho_create_customer"].handler(
+            db, org.id, None, {"email": "x@y.co"}
+        )
+        assert result.get("error")
+    finally:
+        _teardown(db, org)
+
+
 def test_xero_create_invoice_tool_syncs_when_connected(db, monkeypatch):
     from app.ai.tools.integration_tools import INTEGRATION_TOOLS
     from app.models.invoice import Invoice
@@ -594,6 +699,7 @@ def test_tools_registered_and_allowlisted():
 
     for name in (
         "zoho_create_lead",
+        "zoho_create_customer",
         "zoho_list_leads",
         "xero_create_invoice",
         "xero_list_invoices",

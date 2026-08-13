@@ -6,19 +6,11 @@ import Link from "next/link";
 import { DashboardHeader } from "@/components/dashboard/dashboard-header";
 import { ModuleWidgets } from "@/components/dashboard/module-widgets";
 import { StatCard } from "@/components/dashboard/stat-card";
-import { RevenueChart } from "@/components/dashboard/charts";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { motion } from "framer-motion";
-import { currency, fetchInvoices } from "@/services/business";
-
-const BUDGETS = [
-  { name: "Payroll", spent: 41200, total: 46000, color: "from-primary to-secondary" },
-  { name: "Marketing", spent: 14800, total: 20000, color: "from-secondary to-accent" },
-  { name: "Operations", spent: 8900, total: 12000, color: "from-accent to-success" },
-  { name: "Software", spent: 4300, total: 5000, color: "from-warning to-danger" },
-];
+import { currency, fetchBudgets, fetchExpenses, fetchInvoices } from "@/services/business";
 
 const STATUS_VARIANT: Record<string, "success" | "warning" | "danger" | "secondary"> = {
   paid: "success",
@@ -27,21 +19,25 @@ const STATUS_VARIANT: Record<string, "success" | "warning" | "danger" | "seconda
   draft: "secondary",
 };
 
+const GRADIENTS = ["from-primary to-secondary", "from-secondary to-accent", "from-accent to-success", "from-warning to-danger"];
+
 export default function FinanceDashboardPage() {
   const { data: invoicesData, isLoading } = useQuery({
     queryKey: ["invoices"],
     queryFn: fetchInvoices,
   });
+  const { data: budgetsData } = useQuery({ queryKey: ["budgets"], queryFn: fetchBudgets });
+  const { data: expensesData } = useQuery({ queryKey: ["expenses"], queryFn: fetchExpenses });
 
-  const invoices =
-    invoicesData?.source === "db" || invoicesData?.source === "demo"
-      ? invoicesData.items
-      : [];
+  const invoices = invoicesData?.source === "db" ? invoicesData.items : [];
+  const budgets = budgetsData?.source === "db" ? budgetsData.items : [];
+  const expenses = expensesData?.source === "db" ? expensesData.items : [];
 
   const totalInvoiced = invoices.reduce((acc, i) => acc + Number(i.amount ?? 0), 0);
   const outstanding = invoices
     .filter((i) => (i.status ?? "").toLowerCase() !== "paid")
     .reduce((acc, i) => acc + Number(i.amount ?? 0), 0);
+  const totalExpenses = expenses.reduce((acc, e) => acc + Number(e.amount ?? 0), 0);
 
   return (
     <div className="space-y-8">
@@ -59,44 +55,41 @@ export default function FinanceDashboardPage() {
       />
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <StatCard label="Total Invoiced" value={currency(totalInvoiced)} delta={11} icon={<Wallet className="h-5 w-5" />} gradient="from-primary to-secondary" loading={isLoading} />
-        <StatCard label="Outstanding AR" value={currency(outstanding)} delta={7} icon={<FileText className="h-5 w-5" />} gradient="from-warning to-danger" loading={isLoading} />
-        <StatCard label="Invoices" value={String(invoices.length)} delta={14} icon={<DollarSign className="h-5 w-5" />} gradient="from-secondary to-accent" loading={isLoading} />
-        <StatCard label="Expenses (MTD)" value="$69.2k" delta={-4} icon={<Receipt className="h-5 w-5" />} gradient="from-accent to-warning" loading={false} />
+        <StatCard label="Total Invoiced" value={currency(totalInvoiced)} icon={<Wallet className="h-5 w-5" />} gradient="from-primary to-secondary" loading={isLoading} />
+        <StatCard label="Outstanding AR" value={currency(outstanding)} icon={<FileText className="h-5 w-5" />} gradient="from-warning to-danger" loading={isLoading} />
+        <StatCard label="Invoices" value={String(invoices.length)} icon={<DollarSign className="h-5 w-5" />} gradient="from-secondary to-accent" loading={isLoading} />
+        <StatCard label="Expenses" value={`${expenses.length} · ${currency(totalExpenses)}`} icon={<Receipt className="h-5 w-5" />} gradient="from-accent to-warning" loading={!expensesData} />
       </div>
 
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-        <Card className="lg:col-span-2">
-          <CardHeader>
-            <CardTitle>Cash flow</CardTitle>
-            <CardDescription>Monthly income vs expenses</CardDescription>
-          </CardHeader>
-          <CardContent><RevenueChart /></CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>Budget utilization</CardTitle>
-            <CardDescription>Spend vs allocation by category</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {BUDGETS.map((b) => {
-              const pct = Math.round((b.spent / b.total) * 100);
+      {/* Budgets — live from the backend */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Budgets</CardTitle>
+          <CardDescription>Allocated budgets by category</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {!budgetsData ? (
+            <div className="space-y-3">{[1, 2, 3].map((i) => <Skeleton key={i} className="h-10" />)}</div>
+          ) : budgets.length === 0 ? (
+            <p className="text-sm text-slate-500">No budgets defined yet.</p>
+          ) : (
+            budgets.map((b, i) => {
+              const total = Number(b.amount ?? 0);
               return (
-                <div key={b.name}>
+                <div key={b.id}>
                   <div className="mb-1.5 flex items-center justify-between text-sm">
-                    <span className="font-semibold text-slate-200">{b.name}</span>
-                    <span className="text-xs text-slate-400">${b.spent.toLocaleString()} / ${b.total.toLocaleString()}</span>
+                    <span className="font-semibold text-slate-200">{b.name ?? "Untitled budget"}</span>
+                    <span className="text-xs text-slate-400">{currency(total)}{b.period ? ` · ${b.period}` : ""}</span>
                   </div>
                   <div className="h-1.5 w-full overflow-hidden rounded-full bg-card-soft">
-                    <div className={`h-full rounded-full bg-gradient-to-r ${b.color}`} style={{ width: `${pct}%` }} />
+                    <div className={`h-full rounded-full bg-gradient-to-r ${GRADIENTS[i % GRADIENTS.length]}`} style={{ width: `${Math.min(100, Math.max(4, total ? 40 : 0))}%` }} />
                   </div>
                 </div>
               );
-            })}
-          </CardContent>
-        </Card>
-      </div>
+            })
+          )}
+        </CardContent>
+      </Card>
 
       {/* Invoices — live from the backend */}
       <Card>

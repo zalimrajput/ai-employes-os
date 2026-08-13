@@ -301,6 +301,147 @@ export interface MeetingCreate {
   participants?: unknown;
 }
 
+// ── HR ─────────────────────────────────────────────────────
+export interface Employee {
+  id: string;
+  organization_id: string;
+  user_id?: string | null;
+  employee_code?: string | null;
+  first_name: string;
+  last_name?: string | null;
+  email?: string | null;
+  phone?: string | null;
+  department_id?: string | null;
+  position?: string | null;
+  joining_date?: string | null;
+  salary?: number | null;
+  status?: string | null;
+  metadata?: Record<string, unknown> | null;
+  created_at?: string;
+}
+
+export interface LeaveRequest {
+  id: string;
+  organization_id?: string | null;
+  employee_id?: string | null;
+  leave_type?: string | null;
+  start_date?: string | null;
+  end_date?: string | null;
+  reason?: string | null;
+  status?: string | null;
+  approved_by?: string | null;
+  created_at?: string;
+}
+
+export interface JobCandidate {
+  id: string;
+  organization_id?: string | null;
+  name?: string | null;
+  email?: string | null;
+  phone?: string | null;
+  resume_url?: string | null;
+  skills?: unknown;
+  ai_score?: number | null;
+  status?: string | null;
+  created_at?: string;
+}
+
+// ── Support (email + WhatsApp) ─────────────────────────────
+export interface EmailThread {
+  id: string;
+  organization_id: string;
+  customer_id?: string | null;
+  subject?: string | null;
+  participants?: unknown;
+  summary?: string | null;
+  ai_priority?: string | null;
+  category?: string | null;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface WhatsAppMessage {
+  id: string;
+  organization_id?: string | null;
+  contact_id?: string | null;
+  message?: string | null;
+  direction?: string | null;
+  ai_generated?: boolean | null;
+  media?: unknown;
+  created_at?: string;
+  updated_at?: string;
+}
+
+// ── Marketing ──────────────────────────────────────────────
+export interface MarketingCampaign {
+  id: string;
+  organization_id: string;
+  name: string;
+  description?: string | null;
+  campaign_type?: string | null;
+  status?: string | null;
+  start_date?: string | null;
+  end_date?: string | null;
+  budget?: number | null;
+  created_by?: string | null;
+  created_at?: string;
+}
+
+// ── Finance (budgets & expenses) ───────────────────────────
+export interface Budget {
+  id: string;
+  organization_id?: string | null;
+  name?: string | null;
+  amount?: number | null;
+  period?: string | null;
+  start_date?: string | null;
+  end_date?: string | null;
+  created_at?: string;
+}
+
+export interface Expense {
+  id: string;
+  organization_id: string;
+  category_id?: string | null;
+  submitted_by?: string | null;
+  title: string;
+  description?: string | null;
+  amount: number;
+  currency?: string | null;
+  expense_date?: string | null;
+  receipt_url?: string | null;
+  status?: string | null;
+  approved_by?: string | null;
+  created_at?: string;
+}
+
+// ── Billing plans (platform catalog) ───────────────────────
+export interface Plan {
+  id: string;
+  name: string;
+  description?: string | null;
+  price_monthly?: number | null;
+  price_yearly?: number | null;
+  max_users?: number | null;
+  ai_requests_limit?: number | null;
+  storage_limit_gb?: number | null;
+  features?: unknown;
+  active?: boolean | null;
+  created_at?: string;
+}
+
+// ── CRM activities ─────────────────────────────────────────
+export interface Activity {
+  id: string;
+  organization_id: string;
+  user_id?: string | null;
+  entity_type?: string | null;
+  entity_id?: string | null;
+  action: string;
+  metadata?: Record<string, unknown> | null;
+  created_at?: string;
+}
+
 // ── Departments ────────────────────────────────────────────
 export interface OrgDepartment {
   id: string;

@@ -132,6 +132,9 @@ class GoogleCalendarClient:
             "description": description,
             "start": {"dateTime": _to_iso(start_time)},
             "end": {"dateTime": _to_iso(end_time)},
+            # Send email invitations to attendees so the invite shows up in
+            # their Gmail inbox, not just on the calendar.
+            "sendUpdates": "all",
         }
         emails = [
             a for a in (attendees or []) if isinstance(a, str)

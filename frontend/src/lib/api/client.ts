@@ -2,26 +2,36 @@ import { supabase } from "@/lib/supabase/client";
 import type {
   AIConversation,
   AIMessage,
+  Activity,
+  Budget,
   Customer,
   CustomerCreate,
   DepartmentCreate,
+  EmailThread,
+  Employee,
+  Expense,
   ImagePart,
   Invoice,
   InvoiceCreate,
+  JobCandidate,
   Lead,
   LeadCreate,
+  LeaveRequest,
   LoginRequest,
+  MarketingCampaign,
   Meeting,
   MeetingCreate,
   OrgDepartment,
   OrganizationCreate,
   OrganizationResponse,
+  Plan,
   Quotation,
   QuotationCreate,
   Task,
   TokenResponse,
   UserCreate,
   UserResponse,
+  WhatsAppMessage,
 } from "@/lib/api/types";
 
 const BACKEND_URL =
@@ -176,6 +186,28 @@ export const api = {
   fetchMeetings: () => apiFetch<Meeting[]>("/api/v1/meetings/"),
   createMeeting: (body: MeetingCreate) =>
     apiFetch<Meeting>("/api/v1/meetings/", { method: "POST", body }),
+
+  // ── CRM activities ───────────────────────────────────────
+  fetchActivities: () => apiFetch<Activity[]>("/api/v1/activities/"),
+
+  // ── HR ───────────────────────────────────────────────────
+  fetchEmployees: () => apiFetch<Employee[]>("/api/v1/employees/"),
+  fetchLeaveRequests: () => apiFetch<LeaveRequest[]>("/api/v1/leave-requests/"),
+  fetchCandidates: () => apiFetch<JobCandidate[]>("/api/v1/candidates/"),
+
+  // ── Support (email + WhatsApp) ───────────────────────────
+  fetchEmailThreads: () => apiFetch<EmailThread[]>("/api/v1/email-threads/"),
+  fetchWhatsappMessages: () => apiFetch<WhatsAppMessage[]>("/api/v1/whatsapp-messages/"),
+
+  // ── Marketing ────────────────────────────────────────────
+  fetchCampaigns: () => apiFetch<MarketingCampaign[]>("/api/v1/campaigns/"),
+
+  // ── Finance (budgets & expenses) ─────────────────────────
+  fetchBudgets: () => apiFetch<Budget[]>("/api/v1/budgets/"),
+  fetchExpenses: () => apiFetch<Expense[]>("/api/v1/expenses/"),
+
+  // ── Billing plans (public catalog) ───────────────────────
+  fetchPlans: () => apiFetch<Plan[]>("/api/v1/billing/plans"),
 
   // ── Tasks ────────────────────────────────────────────────
   fetchTasks: () => apiFetch<Task[]>("/api/v1/tasks/"),

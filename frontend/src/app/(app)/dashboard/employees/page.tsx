@@ -2,7 +2,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
-import { Loader2, Plus, Search, Sparkles } from "lucide-react";
+import { Loader2, Plus, Search } from "lucide-react";
 import Link from "next/link";
 import { EmployeeCard } from "@/components/ai/employee-card";
 import { ModuleWidgets } from "@/components/dashboard/module-widgets";
@@ -11,7 +11,6 @@ import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { fetchAIEmployees } from "@/services/data";
 import { toast } from "sonner";
-import { motion } from "framer-motion";
 
 const ROLES = ["All", "Marketing", "Sales", "Support", "Finance", "HR", "Executive"];
 
@@ -24,7 +23,7 @@ export default function AIEmployeesPage() {
   const [query, setQuery] = useState("");
   const [hiring, setHiring] = useState(false);
 
-  const employees = data?.source === "db" || data?.source === "demo" ? data.items : [];
+  const employees = data?.source === "db" ? data.items : [];
   const filtered = employees.filter((e) => {
     const matchesRole = filter === "All" || e.role.includes(filter);
     const q = query.toLowerCase();
@@ -99,13 +98,6 @@ export default function AIEmployeesPage() {
             </Link>
           ))}
         </div>
-      )}
-
-      {data?.source === "demo" && (
-        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex items-center gap-2 rounded-xl border border-accent/30 bg-accent/10 px-4 py-3 text-sm text-cyan-300">
-          <Sparkles className="h-4 w-4 shrink-0" />
-          Showing a preview team — your workspace&apos;s AI employees will appear here as soon as you deploy them.
-        </motion.div>
       )}
 
       {/* Module widgets — gated by the org's enabled modules */}

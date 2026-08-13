@@ -2,7 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { Kanban, Loader2, Plus, Sparkles } from "lucide-react";
+import { Loader2, Plus, Sparkles } from "lucide-react";
 import { KanbanBoard } from "@/components/tasks/kanban";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -20,7 +20,7 @@ export default function TasksPage() {
   const [title, setTitle] = useState("");
   const [priority, setPriority] = useState<"low" | "medium" | "high" | "urgent">("medium");
 
-  const tasks = data?.source === "db" || data?.source === "demo" ? data.items : [];
+  const tasks = data?.source === "db" ? data.items : [];
 
   const moveMutation = useMutation({
     mutationFn: ({ id, status }: { id: string; status: TaskStatus }) => updateTaskStatus(id, status),
@@ -104,12 +104,6 @@ export default function TasksPage() {
         </div>
       ) : (
         <KanbanBoard tasks={tasks} onMove={(id, status) => moveMutation.mutate({ id, status })} />
-      )}
-
-      {data?.source === "demo" && (
-        <p className="inline-flex items-center gap-2 rounded-xl border border-accent/30 bg-accent/10 px-4 py-3 text-sm text-cyan-300">
-          <Kanban className="h-4 w-4" /> Preview tasks shown — drag them to try the board. Live tasks from your workspace will appear automatically.
-        </p>
       )}
     </div>
   );

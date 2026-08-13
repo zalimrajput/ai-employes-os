@@ -7,7 +7,6 @@ import {
   Bot,
   CalendarClock,
   Cpu,
-  Mail,
   MessageSquare,
   Pencil,
   Settings2,
@@ -17,10 +16,9 @@ import { Avatar } from "@/components/ui/avatar";
 import { Badge, StatusDot } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
 import { fetchAIEmployees, fetchTasks } from "@/services/data";
-import { formatCompact, hashString, timeAgo } from "@/lib/utils";
+import { formatCompact, timeAgo } from "@/lib/utils";
 import { motion } from "framer-motion";
 
 export default function EmployeeDetailPage() {
@@ -28,9 +26,9 @@ export default function EmployeeDetailPage() {
   const { data, isLoading } = useQuery({ queryKey: ["ai-employees"], queryFn: fetchAIEmployees });
   const { data: tasks } = useQuery({ queryKey: ["tasks"], queryFn: fetchTasks });
 
-  const employees = data?.source === "db" || data?.source === "demo" ? data.items : [];
+  const employees = data?.source === "db" ? data.items : [];
   const employee = employees.find((e) => e.id === id);
-  const taskItems = tasks?.source === "db" || tasks?.source === "demo" ? tasks.items : [];
+  const taskItems = tasks?.source === "db" ? tasks.items : [];
 
   if (isLoading) {
     return (
@@ -49,16 +47,6 @@ export default function EmployeeDetailPage() {
       </div>
     );
   }
-
-  const efficiency = 82 + (hashString(employee.id) % 17);
-  const completedToday = 6 + (hashString(employee.id) % 14);
-  const history = [
-    { t: "Drafted 3 email variants for the Q3 launch", ago: "2h ago" },
-    { t: "Sent quotation to Acme Corp (25 laptops, PDF attached)", ago: "4h ago" },
-    { t: "Updated CRM — moved 2 deals to “Closed Won”", ago: "6h ago" },
-    { t: "Scheduled meeting with GlobalTech at 3 PM Friday", ago: "1d ago" },
-    { t: "Summarized Monday standup — 5 action items extracted", ago: "2d ago" },
-  ];
 
   return (
     <div className="space-y-6">
@@ -111,28 +99,6 @@ export default function EmployeeDetailPage() {
                 <span className="flex items-center gap-2 text-slate-400"><CalendarClock className="h-4 w-4" /> Joined</span>
                 <span className="text-slate-300">{timeAgo(employee.created_at)}</span>
               </div>
-              <div className="flex items-center justify-between">
-                <span className="flex items-center gap-2 text-slate-400"><Mail className="h-4 w-4" /> Email</span>
-                <span className="text-slate-300">{employee.name.toLowerCase().replace(/\s+/g, ".")}@ai.os</span>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader><CardTitle>Efficiency</CardTitle><CardDescription>Rolling 30-day performance</CardDescription></CardHeader>
-            <CardContent className="space-y-4">
-              <div>
-                <div className="mb-1 flex justify-between text-xs font-semibold"><span className="text-slate-500">Output quality</span><span className="text-gradient">{efficiency}%</span></div>
-                <Progress value={efficiency} />
-              </div>
-              <div>
-                <div className="mb-1 flex justify-between text-xs font-semibold"><span className="text-slate-500">Tasks today</span><span className="text-white">{completedToday}</span></div>
-                <Progress value={(completedToday / 20) * 100} barClassName="from-accent to-primary" />
-              </div>
-              <div>
-                <div className="mb-1 flex justify-between text-xs font-semibold"><span className="text-slate-500">Uptime</span><span className="text-white">99.9%</span></div>
-                <Progress value={99.9} barClassName="from-success to-accent" />
-              </div>
             </CardContent>
           </Card>
         </div>
@@ -158,21 +124,6 @@ export default function EmployeeDetailPage() {
             </CardContent>
           </Card>
 
-          <Card>
-            <CardHeader><CardTitle>Activity timeline</CardTitle><CardDescription>Recent actions by this employee</CardDescription></CardHeader>
-            <CardContent>
-              <div className="relative space-y-5 pl-5">
-                <div className="absolute left-1.5 top-1 h-full w-px bg-border-soft" />
-                {history.map((h, i) => (
-                  <motion.div key={i} initial={{ opacity: 0, x: -8 }} whileInView={{ opacity: 1, x: 0 }} viewport={{ once: true }} transition={{ delay: i * 0.08 }} className="relative">
-                    <span className="absolute -left-5 top-1 h-3 w-3 rounded-full bg-gradient-to-br from-primary to-accent ring-4 ring-card" />
-                    <p className="text-sm font-medium text-slate-200">{h.t}</p>
-                    <p className="text-xs text-slate-500">{h.ago}</p>
-                  </motion.div>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
         </div>
       </div>
     </div>

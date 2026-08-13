@@ -92,6 +92,8 @@ def test_create_event_success(monkeypatch):
     method, url, payload = calls[0]
     assert method == "POST" and url == EVENTS_URL
     assert payload["attendees"] == [{"email": "a@b.com"}]
+    # Attendees must receive a Gmail invitation, not just a calendar entry.
+    assert payload["sendUpdates"] == "all"
 
 
 def test_refresh_then_retry_success(monkeypatch, db):
@@ -216,6 +218,151 @@ def test_not_connected_raises():
         get_client(_FakeDB(), "org")
 
 
+def test_parse_iso_datetime():
+    from app.ai.tools.task_tools import _parse_meeting_datetime
+
+    dt = _parse_meeting_datetime("2026-08-13T10:00:00Z")
+    assert dt is not None
+    assert dt.isoformat() == "2026-08-13T10:00:00+00:00"
+
+
+def test_parse_written_date():
+    from app.ai.tools.task_tools import _parse_meeting_datetime
+
+    dt = _parse_meeting_datetime("Aug 13 2026 10:00 AM")
+    assert dt is not None
+    assert (dt.month, dt.day, dt.hour) == (8, 13, 10)
+
+
+def test_parse_weekday_phrase():
+    from datetime import datetime, timezone
+
+    from app.ai.tools.task_tools import _parse_meeting_datetime
+
+    dt = _parse_meeting_datetime("Monday at 8:00 AM")
+    assert dt is not None
+    assert dt.weekday() == 0  # Monday
+    assert (dt.hour, dt.minute) == (8, 0)
+    assert dt.tzinfo is not None
+    assert dt > datetime.now(timezone.utc)
+
+
+def test_parse_tomorrow_phrase():
+    from datetime import datetime, timedelta, timezone
+
+    from app.ai.tools.task_tools import _parse_meeting_datetime
+
+    dt = _parse_meeting_datetime("tomorrow at 3 PM")
+    assert dt is not None
+    assert dt.date() == datetime.now(timezone.utc).date() + timedelta(days=1)
+    assert (dt.hour, dt.minute) == (15, 0)
+
+
+def test_parse_unparseable_returns_none():
+    from app.ai.tools.task_tools import _parse_meeting_datetime
+
+    assert _parse_meeting_datetime(None) is None
+    assert _parse_meeting_datetime("") is None
+    assert _parse_meeting_datetime("sometime soon maybe") is None
+
+
+@pytest.mark.db
+def test_create_meeting_accepts_natural_language_time(db):
+    """LLM output like 'Monday at 8:00 AM' must be parsed, not sent raw to
+    the timestamptz column (which previously caused a 500)."""
+    from app.ai.tools.task_tools import TASK_TOOLS
+    from app.models.meeting import Meeting
+
+    org = _org(db)
+    try:
+        result = TASK_TOOLS["create_meeting"].handler(
+            db,
+            org.id,
+            None,
+            {
+                "title": "Meeting with Azhar - 25 Laptops Discussion",
+                "start_time": "Monday at 8:00 AM",
+                "participants": ["basiqazhar100@gmail.com"],
+            },
+        )
+        assert result["created"] is True
+        row = (
+            db.query(Meeting)
+            .filter(Meeting.organization_id == org.id)
+            .first()
+        )
+        assert row is not None
+        assert row.start_time is not None
+        assert row.start_time.weekday() == 0
+    finally:
+        _teardown(db, org)
+
+
+@pytest.mark.db
+def test_create_meeting_rejects_past_start_time(db):
+    """A meeting time in the past (LLM hallucination) must be rejected so the
+    model retries with a future date instead of scheduling history."""
+    from app.ai.tools.task_tools import TASK_TOOLS
+    from app.models.meeting import Meeting
+
+    org = _org(db)
+    try:
+        result = TASK_TOOLS["create_meeting"].handler(
+            db,
+            org.id,
+            None,
+            {
+                "title": "Meeting with Azhar",
+                "start_time": "2026-03-09T08:00:00Z",  # in the past
+                "participants": ["azhar@example.com"],
+            },
+        )
+        assert "error" in result
+        assert "in the past" in result["error"]
+        count = (
+            db.query(Meeting)
+            .filter(Meeting.organization_id == org.id)
+            .count()
+        )
+        assert count == 0
+    finally:
+        _teardown(db, org)
+
+
+@pytest.mark.db
+def test_create_meeting_defaults_end_time_for_sync(db):
+    """When the model supplies only a start time, a 1-hour slot is derived so
+    the meeting still syncs to Google Calendar."""
+    from datetime import timedelta
+
+    from app.ai.tools.task_tools import TASK_TOOLS
+    from app.models.meeting import Meeting
+
+    org = _org(db)
+    try:
+        result = TASK_TOOLS["create_meeting"].handler(
+            db,
+            org.id,
+            None,
+            {
+                "title": "Syncable meeting",
+                "start_time": "2026-12-01T10:00:00Z",
+                "participants": ["client@co.com"],
+            },
+        )
+        assert result["created"] is True
+        row = (
+            db.query(Meeting)
+            .filter(Meeting.organization_id == org.id)
+            .first()
+        )
+        assert row is not None
+        assert row.end_time is not None
+        assert row.end_time == row.start_time + timedelta(hours=1)
+    finally:
+        _teardown(db, org)
+
+
 @pytest.mark.db
 def test_create_meeting_succeeds_without_calendar(db):
     """Scheduling must never hard-fail when Calendar isn't connected."""
@@ -230,8 +377,8 @@ def test_create_meeting_succeeds_without_calendar(db):
             None,
             {
                 "title": "Sell the deal",
-                "start_time": "2026-08-01T10:00:00Z",
-                "end_time": "2026-08-01T11:00:00Z",
+                "start_time": "2026-12-01T10:00:00Z",
+                "end_time": "2026-12-01T11:00:00Z",
                 "participants": ["client@co.com"],
             },
         )
@@ -284,8 +431,8 @@ def test_create_meeting_syncs_when_connected(db, monkeypatch):
             None,
             {
                 "title": "Call with Acme",
-                "start_time": "2026-08-01T10:00:00Z",
-                "end_time": "2026-08-01T11:00:00Z",
+                "start_time": "2026-12-01T10:00:00Z",
+                "end_time": "2026-12-01T11:00:00Z",
                 "participants": ["acme@co.com"],
             },
         )
@@ -336,8 +483,8 @@ def test_create_meeting_sync_failure_still_succeeds(db, monkeypatch):
             None,
             {
                 "title": "Meeting that calendar drops",
-                "start_time": "2026-08-01T10:00:00Z",
-                "end_time": "2026-08-01T11:00:00Z",
+                "start_time": "2026-12-01T10:00:00Z",
+                "end_time": "2026-12-01T11:00:00Z",
             },
         )
         assert result["created"] is True

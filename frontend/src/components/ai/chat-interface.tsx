@@ -143,21 +143,8 @@ function MessageBody({ text }: { text: string }) {
   );
 }
 
-/**
- * Demo-only canned replies. Real conversations (non `demo-` ids) go through the
- * backend AI engine; these exist solely so the pre-seeded demo rows in a fresh
- * workspace still feel interactive.
- */
 type Attachment = { id: string; name: string; mime: string; url: string };
 type LocalMessage = AIMessage & { attachments?: string[] };
-
-const DEMO_REPLIES = [
-  "Done! I've drafted it and queued it for review. Want me to send it now?",
-  "I found 3 related records in the CRM. Here's what I prepared — approve and I'll execute.",
-  "Completed ✅ — updated the pipeline and scheduled the follow-up for Friday at 3 PM.",
-  "Here's the summary you asked for. I also extracted 5 action items and created tasks for each.",
-  "On it. I'll track this conversation and remind you if there's no reply within 3 days.",
-];
 
 export function ChatInterface({
   employeeName,
@@ -249,29 +236,20 @@ export function ChatInterface({
     // is still generating the reply.
     setMessages((m) => [...m, userMsg, assistantMsg]);
 
-    const isDemo =
-      conversationId.startsWith("demo-") &&
-      process.env.NEXT_PUBLIC_ENABLE_DEMO === "true";
-
     let reply: string;
-    if (isDemo) {
-      // Demo rows are UI-only — keep them responsive without a backend.
-      reply = DEMO_REPLIES[Math.floor(Math.random() * DEMO_REPLIES.length)];
-    } else {
-      try {
-        // Real conversation: run the AI agent through the backend, which also
-        // persists the user message + assistant reply.
-        const result = await api.sendAIMessage({
-          conversation_id: conversationId,
-          message: text,
-          images,
-        });
-        reply =
-          (result?.message ?? "").trim() ||
-          "I couldn't generate a response — please try again.";
-      } catch (err) {
-        reply = `⚠️ ${(err as Error).message ?? "Something went wrong."}`;
-      }
+    try {
+      // Run the AI agent through the backend, which also persists the user
+      // message + assistant reply.
+      const result = await api.sendAIMessage({
+        conversation_id: conversationId,
+        message: text,
+        images,
+      });
+      reply =
+        (result?.message ?? "").trim() ||
+        "I couldn't generate a response — please try again.";
+    } catch (err) {
+      reply = `⚠️ ${(err as Error).message ?? "Something went wrong."}`;
     }
 
     const streamed = assistantMsg;

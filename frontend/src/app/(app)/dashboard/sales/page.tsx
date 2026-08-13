@@ -32,9 +32,8 @@ export default function SalesDashboardPage() {
   });
   const { data: leadsData } = useQuery({ queryKey: ["leads"], queryFn: fetchLeads });
 
-  const quotations =
-    quotesData?.source === "db" || quotesData?.source === "demo" ? quotesData.items : [];
-  const leads = leadsData?.source === "db" || leadsData?.source === "demo" ? leadsData.items : [];
+  const quotations = quotesData?.source === "db" ? quotesData.items : [];
+  const leads = leadsData?.source === "db" ? leadsData.items : [];
 
   const pipelineValue = quotations.reduce((acc, q) => acc + Number(q.total ?? 0), 0);
   const sentCount = quotations.filter(
@@ -68,10 +67,10 @@ export default function SalesDashboardPage() {
       />
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <StatCard label="Pipeline Value" value={currency(pipelineValue)} delta={18} icon={<DollarSign className="h-5 w-5" />} gradient="from-success to-accent" loading={quotesLoading} />
-        <StatCard label="Active Leads" value={String(leads.length)} delta={12} icon={<Users className="h-5 w-5" />} gradient="from-primary to-secondary" loading={!leadsData} />
-        <StatCard label="Quotations" value={String(quotations.length)} delta={9} icon={<FileText className="h-5 w-5" />} gradient="from-secondary to-accent" loading={quotesLoading} />
-        <StatCard label="Sent / Pending" value={String(sentCount)} delta={5} icon={<Target className="h-5 w-5" />} gradient="from-accent to-success" loading={quotesLoading} />
+        <StatCard label="Pipeline Value" value={currency(pipelineValue)} icon={<DollarSign className="h-5 w-5" />} gradient="from-success to-accent" loading={quotesLoading} />
+        <StatCard label="Active Leads" value={String(leads.length)} icon={<Users className="h-5 w-5" />} gradient="from-primary to-secondary" loading={!leadsData} />
+        <StatCard label="Quotations" value={String(quotations.length)} icon={<FileText className="h-5 w-5" />} gradient="from-secondary to-accent" loading={quotesLoading} />
+        <StatCard label="Sent / Pending" value={String(sentCount)} icon={<Target className="h-5 w-5" />} gradient="from-accent to-success" loading={quotesLoading} />
       </div>
 
       {/* Quotations by status */}

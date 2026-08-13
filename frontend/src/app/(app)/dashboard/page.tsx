@@ -5,7 +5,6 @@ import { Bot, Kanban, Workflow, MessageSquare, ArrowRight, Plus } from "lucide-r
 import Link from "next/link";
 import { motion } from "framer-motion";
 import { StatCard } from "@/components/dashboard/stat-card";
-import { RevenueChart, TasksChart, EfficiencyChart } from "@/components/dashboard/charts";
 import { ActivityFeed } from "@/components/dashboard/activity-feed";
 import { ModuleWidgets } from "@/components/dashboard/module-widgets";
 import { Badge } from "@/components/ui/badge";
@@ -20,7 +19,7 @@ export default function DashboardPage() {
   const { data: stats } = useQuery({ queryKey: ["org-stats"], queryFn: fetchOrgStats });
   const { data: tasks } = useQuery({ queryKey: ["tasks"], queryFn: fetchTasks });
 
-  const taskItems = tasks?.source === "db" || tasks?.source === "demo" ? tasks.items : [];
+  const taskItems = tasks?.source === "db" ? tasks.items : [];
 
   return (
     <div className="space-y-8">
@@ -46,28 +45,10 @@ export default function DashboardPage() {
 
       {/* Stat cards */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <StatCard label="AI Employees" value={formatCompact(stats?.employees ?? 0)} delta={18} icon={<Bot className="h-5 w-5" />} gradient="from-primary to-secondary" loading={!stats} />
-        <StatCard label="Tasks Completed" value={formatCompact(stats?.tasks ?? 0)} delta={12} icon={<Kanban className="h-5 w-5" />} gradient="from-secondary to-accent" loading={!stats} />
-        <StatCard label="Active Workflows" value={formatCompact(stats?.workflows ?? 0)} delta={8} icon={<Workflow className="h-5 w-5" />} gradient="from-accent to-primary" loading={!stats} />
-        <StatCard label="AI Conversations" value={formatCompact(stats?.conversations ?? 0)} delta={24} icon={<MessageSquare className="h-5 w-5" />} gradient="from-warning to-danger" loading={!stats} />
-      </div>
-
-      {/* Charts row */}
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-        <Card className="lg:col-span-2">
-          <CardHeader>
-            <CardTitle>Revenue & AI-handled work</CardTitle>
-            <CardDescription>Monthly performance across your organization</CardDescription>
-          </CardHeader>
-          <CardContent><RevenueChart /></CardContent>
-        </Card>
-        <Card>
-          <CardHeader>
-            <CardTitle>Automation efficiency</CardTitle>
-            <CardDescription>Share of work handled by AI employees</CardDescription>
-          </CardHeader>
-          <CardContent className="flex flex-col items-center"><EfficiencyChart /></CardContent>
-        </Card>
+        <StatCard label="AI Employees" value={formatCompact(stats?.employees ?? 0)} icon={<Bot className="h-5 w-5" />} gradient="from-primary to-secondary" loading={!stats} />
+        <StatCard label="Tasks Completed" value={formatCompact(stats?.tasks ?? 0)} icon={<Kanban className="h-5 w-5" />} gradient="from-secondary to-accent" loading={!stats} />
+        <StatCard label="Active Workflows" value={formatCompact(stats?.workflows ?? 0)} icon={<Workflow className="h-5 w-5" />} gradient="from-accent to-primary" loading={!stats} />
+        <StatCard label="AI Conversations" value={formatCompact(stats?.conversations ?? 0)} icon={<MessageSquare className="h-5 w-5" />} gradient="from-warning to-danger" loading={!stats} />
       </div>
 
       {/* Bottom row */}
@@ -84,23 +65,27 @@ export default function DashboardPage() {
           </CardHeader>
           <CardContent>
             <div className="space-y-2">
-              {taskItems.slice(0, 5).map((t) => (
-                <motion.div
-                  key={t.id}
-                  whileHover={{ x: 4 }}
-                  className="flex items-center gap-3 rounded-xl border border-border-soft bg-card-soft/40 p-3 transition-colors hover:border-primary/30"
-                >
-                  <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: PRIORITY_COLORS[t.priority ?? "medium"] }} />
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-semibold text-slate-100">{t.title}</p>
-                    <p className="text-xs text-slate-500">{t.description ?? "No description"}</p>
-                  </div>
-                  <Badge variant={t.status === "done" ? "success" : t.status === "in_progress" ? "accent" : "secondary"}>
-                    {t.status?.replace("_", " ")}
-                  </Badge>
-                  <span className="hidden text-xs text-slate-500 sm:block">{timeAgo(t.due_date ?? t.created_at)}</span>
-                </motion.div>
-              ))}
+              {taskItems.length === 0 ? (
+                <p className="text-sm text-slate-500">No tasks yet — create one to see it here.</p>
+              ) : (
+                taskItems.slice(0, 5).map((t) => (
+                  <motion.div
+                    key={t.id}
+                    whileHover={{ x: 4 }}
+                    className="flex items-center gap-3 rounded-xl border border-border-soft bg-card-soft/40 p-3 transition-colors hover:border-primary/30"
+                  >
+                    <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: PRIORITY_COLORS[t.priority ?? "medium"] }} />
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-semibold text-slate-100">{t.title}</p>
+                      <p className="text-xs text-slate-500">{t.description ?? "No description"}</p>
+                    </div>
+                    <Badge variant={t.status === "done" ? "success" : t.status === "in_progress" ? "accent" : "secondary"}>
+                      {t.status?.replace("_", " ")}
+                    </Badge>
+                    <span className="hidden text-xs text-slate-500 sm:block">{timeAgo(t.due_date ?? t.created_at)}</span>
+                  </motion.div>
+                ))
+              )}
             </div>
           </CardContent>
         </Card>
@@ -108,20 +93,11 @@ export default function DashboardPage() {
         <Card>
           <CardHeader>
             <CardTitle>Activity</CardTitle>
-            <CardDescription>Live actions from your AI employees</CardDescription>
+            <CardDescription>Latest CRM actions</CardDescription>
           </CardHeader>
           <CardContent><ActivityFeed /></CardContent>
         </Card>
       </div>
-
-      {/* Quick chart */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Tasks per day</CardTitle>
-          <CardDescription>Workload handled across the week</CardDescription>
-        </CardHeader>
-        <CardContent><TasksChart /></CardContent>
-      </Card>
 
       {/* Module widgets — powered by the modules enabled for this org */}
       <ModuleWidgets dashboardName="Company Admin Dashboard" />

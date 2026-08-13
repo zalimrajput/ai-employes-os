@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { ArrowRight, Building2, Heart, Sparkles, Star, UserPlus } from "lucide-react";
+import { ArrowRight, Building2, Heart, UserPlus } from "lucide-react";
 import Link from "next/link";
 import { DashboardHeader } from "@/components/dashboard/dashboard-header";
 import { ModuleWidgets } from "@/components/dashboard/module-widgets";
@@ -11,15 +11,8 @@ import { Badge } from "@/components/ui/badge";
 import { Avatar } from "@/components/ui/avatar";
 import { Skeleton } from "@/components/ui/skeleton";
 import { timeAgo } from "@/lib/utils";
-import { fetchCustomers, fetchLeads, initials } from "@/services/business";
+import { fetchActivities, fetchCustomers, fetchLeads, initials } from "@/services/business";
 import { motion } from "framer-motion";
-
-const ACTIVITY = [
-  { icon: "💬", text: "Acme Corp replied to quotation follow-up", time: "2026-07-31T09:20:00Z" },
-  { icon: "📄", text: "GlobalTech signed the SOW proposal", time: "2026-07-31T07:48:00Z" },
-  { icon: "📞", text: "Discovery call with Nova Retail completed", time: "2026-07-30T16:30:00Z" },
-  { icon: "✉️", text: "Nurture email sent to 12 dormant leads", time: "2026-07-30T11:02:00Z" },
-];
 
 export default function CRMDashboardPage() {
   const { data: customersData, isLoading: customersLoading } = useQuery({
@@ -27,12 +20,11 @@ export default function CRMDashboardPage() {
     queryFn: fetchCustomers,
   });
   const { data: leadsData } = useQuery({ queryKey: ["leads"], queryFn: fetchLeads });
+  const { data: activitiesData } = useQuery({ queryKey: ["activities"], queryFn: fetchActivities });
 
-  const customers =
-    customersData?.source === "db" || customersData?.source === "demo"
-      ? customersData.items
-      : [];
-  const leads = leadsData?.source === "db" || leadsData?.source === "demo" ? leadsData.items : [];
+  const customers = customersData?.source === "db" ? customersData.items : [];
+  const leads = leadsData?.source === "db" ? leadsData.items : [];
+  const activities = activitiesData?.source === "db" ? activitiesData.items : [];
 
   return (
     <div className="space-y-8">
@@ -53,7 +45,6 @@ export default function CRMDashboardPage() {
         <StatCard
           label="Total Customers"
           value={customersLoading ? "—" : String(customers.length)}
-          delta={8}
           icon={<Building2 className="h-5 w-5" />}
           gradient="from-primary to-secondary"
           loading={customersLoading}
@@ -61,13 +52,17 @@ export default function CRMDashboardPage() {
         <StatCard
           label="Active Leads"
           value={String(leads.length)}
-          delta={17}
           icon={<UserPlus className="h-5 w-5" />}
           gradient="from-secondary to-accent"
           loading={!leadsData}
         />
-        <StatCard label="Avg. Health Score" value="81" delta={6} icon={<Heart className="h-5 w-5" />} gradient="from-accent to-success" loading={false} />
-        <StatCard label="Renewal Rate" value="94%" delta={3} icon={<Star className="h-5 w-5" />} gradient="from-success to-accent" loading={false} />
+        <StatCard
+          label="Recorded Activities"
+          value={String(activities.length)}
+          icon={<Heart className="h-5 w-5" />}
+          gradient="from-accent to-success"
+          loading={!activitiesData}
+        />
       </div>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
@@ -115,57 +110,42 @@ export default function CRMDashboardPage() {
           </CardContent>
         </Card>
 
-        {/* Relationship activity */}
+        {/* Relationship activity — live from the CRM */}
         <Card>
           <CardHeader>
             <CardTitle>Relationship activity</CardTitle>
             <CardDescription>Latest touches tracked by the CRM</CardDescription>
           </CardHeader>
           <CardContent className="space-y-2">
-            {ACTIVITY.map((a, i) => (
-              <motion.div
-                key={i}
-                initial={{ opacity: 0, x: -10 }}
-                whileInView={{ opacity: 1, x: 0 }}
-                viewport={{ once: true }}
-                transition={{ delay: i * 0.06 }}
-                className="flex items-start gap-3 rounded-xl p-3 transition-colors hover:bg-card-soft/60"
-              >
-                <span className="mt-0.5 flex h-8 w-8 items-center justify-center rounded-lg bg-card-soft text-base">{a.icon}</span>
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm font-medium text-slate-200">{a.text}</p>
-                  <p className="text-xs text-slate-500">{timeAgo(a.time)}</p>
-                </div>
-              </motion.div>
-            ))}
+            {!activitiesData ? (
+              <div className="space-y-2">{[1, 2, 3].map((i) => <Skeleton key={i} className="h-12" />)}</div>
+            ) : activities.length === 0 ? (
+              <p className="text-sm text-slate-500">No activity recorded yet.</p>
+            ) : (
+              activities.slice(0, 6).map((a, i) => (
+                <motion.div
+                  key={a.id}
+                  initial={{ opacity: 0, x: -10 }}
+                  whileInView={{ opacity: 1, x: 0 }}
+                  viewport={{ once: true }}
+                  transition={{ delay: i * 0.06 }}
+                  className="flex items-start gap-3 rounded-xl p-3 transition-colors hover:bg-card-soft/60"
+                >
+                  <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-card-soft text-base">
+                    {a.entity_type === "customer" ? "🤝" : a.entity_type === "quotation" ? "📄" : a.entity_type === "invoice" ? "🧾" : "📌"}
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-medium text-slate-200">{a.action}</p>
+                    <p className="text-xs text-slate-500">
+                      {a.entity_type ?? "note"}{a.created_at ? ` · ${timeAgo(a.created_at)}` : ""}
+                    </p>
+                  </div>
+                </motion.div>
+              ))
+            )}
           </CardContent>
         </Card>
       </div>
-
-      {/* AI insights */}
-      <Card>
-        <CardHeader className="flex-row items-center gap-2.5">
-          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-primary to-accent">
-            <Sparkles className="h-4.5 w-4.5 text-white" />
-          </div>
-          <div>
-            <CardTitle>AI relationship insights</CardTitle>
-            <CardDescription>Generated by your AI CRM assistant</CardDescription>
-          </div>
-        </CardHeader>
-        <CardContent className="grid grid-cols-1 gap-3 md:grid-cols-3">
-          {[
-            { title: "Upsell opportunity", body: "GlobalTech usage grew 40% — recommend the Business plan at renewal." },
-            { title: "Churn risk", body: "Nova Retail's health dropped 12pts; schedule a check-in call this week." },
-            { title: "Expansion signal", body: "BrightLaw uploaded 3 contracts — likely to add seats in Q3." },
-          ].map((tip) => (
-            <div key={tip.title} className="rounded-xl border border-accent/30 bg-accent/10 p-4">
-              <p className="text-sm font-bold text-cyan-300">{tip.title}</p>
-              <p className="mt-1 text-sm text-slate-300">{tip.body}</p>
-            </div>
-          ))}
-        </CardContent>
-      </Card>
 
       {/* Module widgets — gated by the org's enabled modules */}
       <ModuleWidgets dashboardName="CRM Dashboard" />

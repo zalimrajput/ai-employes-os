@@ -23,6 +23,8 @@ export function LoginForm() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
+  const [sendingReset, setSendingReset] = useState(false);
+  const [resetSent, setResetSent] = useState(false);
 
   /**
    * Finish a workspace whose org could not be created at signup because email
@@ -101,6 +103,30 @@ export function LoginForm() {
     await signInAndRedirect(email, password, "Welcome back!");
   }
 
+  /** Send a Supabase password-recovery link to the entered email. */
+  async function handleForgotPassword() {
+    if (!email.trim()) {
+      toast.error("Enter your email address first.");
+      return;
+    }
+    setSendingReset(true);
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
+        // The recovery link lands here; the page reads the token and lets the
+        // user set a new password. Add this origin to Supabase → Auth → URL
+        // Configuration → Redirect URLs for production.
+        redirectTo: `${window.location.origin}/reset-password`,
+      });
+      if (error) throw error;
+      setResetSent(true);
+      toast.success("Password reset link sent — check your inbox.");
+    } catch (err) {
+      toast.error((err as Error).message || "Could not send the reset link");
+    } finally {
+      setSendingReset(false);
+    }
+  }
+
   async function handleOAuth(provider: "google" | "azure") {
     toast.info("Redirecting to sign-in…");
     // Supabase OAuth flows are wired via the Supabase project; the URL is
@@ -162,8 +188,13 @@ export function LoginForm() {
       <div className="space-y-2">
         <div className="flex items-center justify-between">
           <Label htmlFor="password">Password</Label>
-          <button type="button" className="text-xs font-semibold text-primary-soft hover:text-white transition-colors cursor-pointer">
-            Forgot password?
+          <button
+            type="button"
+            onClick={handleForgotPassword}
+            disabled={sendingReset}
+            className="text-xs font-semibold text-primary-soft hover:text-white transition-colors cursor-pointer disabled:opacity-50"
+          >
+            {sendingReset ? "Sending…" : "Forgot password?"}
           </button>
         </div>
         <div className="relative">
@@ -185,6 +216,13 @@ export function LoginForm() {
           {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <>Sign in <ArrowRight className="h-4 w-4" /></>}
         </Button>
       </motion.div>
+
+      {resetSent && (
+        <p className="rounded-xl border border-success/30 bg-success/10 px-4 py-3 text-xs text-green-300">
+          Reset link sent to <span className="font-bold">{email.trim()}</span> — check your inbox, then
+          use the link to set a new password.
+        </p>
+      )}
 
       <p className="text-center text-sm text-slate-500">
         Don&apos;t have an account?{" "}

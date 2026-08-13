@@ -17,7 +17,7 @@ ZOHO_API_BASE = "https://www.zohoapis.com/crm/v2"
 
 
 class ZohoCRMClient:
-    """Minimal Zoho CRM client (Leads module) with automatic token refresh."""
+    """Minimal Zoho CRM client (Leads + Contacts modules) with automatic token refresh."""
 
     def __init__(
         self,
@@ -143,6 +143,50 @@ class ZohoCRMClient:
             "lead_id": lead.get("id"),
             "status": lead.get("Status"),
             "record_details": lead.get("details") or lead,
+        }
+
+    def create_customer(
+        self,
+        *,
+        name: str,
+        company: str | None = None,
+        email: str | None = None,
+        phone: str | None = None,
+        address: str | None = None,
+        notes: str | None = None,
+    ) -> dict:
+        """Create a customer as a Contact in Zoho CRM (mirrors internal CRM).
+
+        The name is split into First_Name/Last_Name when it contains a space;
+        `company` maps to the Account_Name field, `notes` to Description.
+        """
+        parts = [p for p in (name or "").strip().split() if p]
+        first_name = " ".join(parts[:-1]) if len(parts) > 1 else None
+        last_name = parts[-1] if parts else (name or "")
+
+        payload: dict = {}
+        if first_name:
+            payload["First_Name"] = first_name
+        payload["Last_Name"] = last_name
+        if company:
+            payload["Account_Name"] = company
+        if email:
+            payload["Email"] = email
+        if phone:
+            payload["Phone"] = phone
+        if address:
+            payload["Mailing_Street"] = address
+        if notes:
+            payload["Description"] = notes
+
+        resp = self._request("POST", "Contacts", json={"data": [payload]})
+        self._raise(resp, "create customer")
+        data = resp.json()
+        contact = (data.get("data") or [{}])[0]
+        return {
+            "created": True,
+            "contact_id": contact.get("id"),
+            "record_details": contact.get("details") or contact,
         }
 
     def list_leads(self, limit: int = 25) -> list[dict]:

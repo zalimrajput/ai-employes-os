@@ -87,6 +87,38 @@ def _zoho_create_lead(db, org_id, user_id, arguments: dict):
     return result
 
 
+def _zoho_create_customer(db, org_id, user_id, arguments: dict):
+    """Create a customer in the internal CRM and mirror it to Zoho when connected."""
+    from app.ai.tools.crm_tools import CRM_TOOLS
+    from app.integrations.gmail.client import IntegrationNotConnectedError
+    from app.integrations.zoho.service import get_client as zoho_get_client
+
+    result = CRM_TOOLS["create_customer"].handler(db, org_id, user_id, arguments)
+    if "error" in result:
+        return result
+
+    synced = {"customer_id": result["id"], "synced_to": "internal"}
+    try:
+        client = zoho_get_client(db, org_id)
+    except IntegrationNotConnectedError as exc:
+        synced["zoho"] = {"error": str(exc)}
+        return synced
+    try:
+        zoho = client.create_customer(
+            name=result["name"],
+            company=arguments.get("company"),
+            email=arguments.get("email"),
+            phone=arguments.get("phone"),
+            address=arguments.get("address"),
+            notes=arguments.get("notes"),
+        )
+        synced["zoho"] = zoho
+        synced["synced_to"] = "internal+zoho"
+    except Exception as exc:  # noqa: BLE001 - report, never crash the turn
+        synced["zoho"] = {"error": f"{exc.__class__.__name__}: {exc}"}
+    return synced
+
+
 def _zoho_list_leads(db, org_id, user_id, arguments: dict):
     from app.integrations.gmail.client import IntegrationNotConnectedError
     from app.integrations.zoho.service import get_client as zoho_get_client
@@ -325,6 +357,28 @@ INTEGRATION_TOOLS: dict[str, ToolSpec] = {
             "required": ["last_name"],
         },
         handler=_zoho_create_lead,
+    ),
+    "zoho_create_customer": ToolSpec(
+        name="zoho_create_customer",
+        description=(
+            "Create a customer in the CRM. The customer is always stored "
+            "internally, and when Zoho is connected it is also created as a "
+            "Contact in Zoho CRM (the 'Add a customer' flow)."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "Customer name (required)"},
+                "email": {"type": "string"},
+                "phone": {"type": "string"},
+                "company": {"type": "string"},
+                "address": {"type": "string"},
+                "notes": {"type": "string"},
+                "status": {"type": "string"},
+            },
+            "required": ["name"],
+        },
+        handler=_zoho_create_customer,
     ),
     "zoho_list_leads": ToolSpec(
         name="zoho_list_leads",

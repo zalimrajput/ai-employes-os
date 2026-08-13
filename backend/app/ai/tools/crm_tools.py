@@ -198,6 +198,36 @@ def _list_deals(db, org_id, user_id, arguments: dict):
     ]
 
 
+def _create_customer(db, org_id, user_id, arguments: dict):
+    from app.models.customer import Customer
+
+    name = str(arguments.get("name") or "").strip()
+    if not name:
+        return {"error": "name is required to create a customer"}
+
+    customer = Customer(
+        organization_id=org_id,
+        name=name,
+        email=arguments.get("email"),
+        phone=arguments.get("phone"),
+        company=arguments.get("company"),
+        address=arguments.get("address"),
+        notes=arguments.get("notes"),
+        status=arguments.get("status") or "active",
+    )
+    db.add(customer)
+    db.commit()
+    db.refresh(customer)
+    return {
+        "id": str(customer.id),
+        "name": customer.name,
+        "email": customer.email,
+        "company": customer.company,
+        "phone": customer.phone,
+        "status": customer.status,
+    }
+
+
 def _create_activity(db, org_id, user_id, arguments: dict):
     from app.services.crm_service import log_activity
 
@@ -491,6 +521,29 @@ CRM_TOOLS: dict[str, ToolSpec] = {
             },
         },
         handler=_create_activity,
+    ),
+    "create_customer": ToolSpec(
+        name="create_customer",
+        description=(
+            "Create a new customer record in the CRM. Only `name` is "
+            "required; email, phone, company, address and notes are optional. "
+            "Returns the new customer's id so follow-up tools (invoices, "
+            "quotations, meetings) can reference it."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "Customer name (required)"},
+                "email": {"type": "string"},
+                "phone": {"type": "string"},
+                "company": {"type": "string"},
+                "address": {"type": "string"},
+                "notes": {"type": "string"},
+                "status": {"type": "string", "description": "Defaults to 'active'"},
+            },
+            "required": ["name"],
+        },
+        handler=_create_customer,
     ),
     "summarize_customer": ToolSpec(
         name="summarize_customer",

@@ -25,7 +25,7 @@ const ACTION_LABELS: Record<string, string> = {
 
 export default function WorkflowsPage() {
   const { data, isLoading } = useQuery({ queryKey: ["workflows"], queryFn: fetchWorkflows });
-  const workflows = data?.source === "db" || data?.source === "demo" ? data.items : [];
+  const workflows = data?.source === "db" ? data.items : [];
 
   return (
     <div className="space-y-6">
@@ -103,12 +103,6 @@ export default function WorkflowsPage() {
             );
           })}
         </div>
-      )}
-
-      {data?.source === "demo" && (
-        <p className="inline-flex items-center gap-2 rounded-xl border border-accent/30 bg-accent/10 px-4 py-3 text-sm text-cyan-300">
-          <Zap className="h-4 w-4" /> Preview automations shown — your workspace&apos;s workflows will appear here automatically.
-        </p>
       )}
     </div>
   );

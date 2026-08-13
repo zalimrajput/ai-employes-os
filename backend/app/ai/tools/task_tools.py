@@ -1,7 +1,11 @@
 """Task and meeting tools."""
 import json
 import logging
+import re
+from datetime import datetime, timedelta, timezone
 from uuid import UUID
+
+from dateutil import parser as dateutil_parser
 
 from app.ai import model_router
 from app.ai.tools.base import ToolSpec
@@ -10,6 +14,103 @@ logger = logging.getLogger("app.ai.tools.task_tools")
 
 _NOTES_LIMIT = 6000
 _ACTION_ITEMS_LIMIT = 20
+
+_WEEKDAYS = {
+    "monday": 0, "tuesday": 1, "wednesday": 2, "thursday": 3,
+    "friday": 4, "saturday": 5, "sunday": 6,
+}
+
+
+def _parse_meeting_datetime(value):
+    """Coerce an LLM-supplied meeting time into a timezone-aware datetime.
+
+    Accepts ISO 8601 (``2026-08-13T10:00:00Z``), written dates via dateutil
+    (``Aug 13, 2026 10:00 AM``) and the natural-language phrases models tend
+    to emit for a meeting request (``Monday at 8:00 AM``, ``tomorrow at 3 PM``,
+    ``next Friday``). Returns ``None`` when the value cannot be interpreted so
+    the meeting is still created (without a scheduled time) instead of failing
+    the turn with a ``timestamptz`` parse error.
+    """
+    if value is None or isinstance(value, datetime):
+        return value
+    raw = str(value).strip()
+    if not raw:
+        return None
+
+    def aware(dt: datetime) -> datetime:
+        return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+    # 1) ISO 8601 / machine timestamps.
+    try:
+        return aware(datetime.fromisoformat(raw.replace("Z", "+00:00")))
+    except ValueError:
+        pass
+
+    now = datetime.now(timezone.utc)
+
+    def clock():
+        """Extract (hour, minute) from phrases like '8:00 AM' or '17:30'."""
+        m = re.search(
+            r"(\d{1,2})(?::(\d{2}))?\s*(a\.?m\.?|p\.?m\.?)?", raw, re.IGNORECASE
+        )
+        if not m:
+            return None
+        hour, minute = int(m.group(1)), int(m.group(2) or 0)
+        ampm = (m.group(3) or "").lower().replace(".", "")
+        if ampm == "pm" and hour < 12:
+            hour += 12
+        elif ampm == "am" and hour == 12:
+            hour = 0
+        if hour > 23 or minute > 59:
+            return None
+        return hour, minute
+
+    # A written date (year or month name) means dateutil can resolve it exactly;
+    # weekday/tomorrow phrases only make sense when no date is present.
+    has_full_date = bool(
+        re.search(
+            r"\b(19|20)\d{2}\b|"
+            r"\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\w*",
+            raw,
+            re.IGNORECASE,
+        )
+    )
+
+    if not has_full_date:
+        # 2) "tomorrow at 3 PM" / "today at 5pm" / "tonight at 8".
+        day_m = re.search(r"\b(tomorrow|tonight|today)\b", raw, re.IGNORECASE)
+        if day_m:
+            word = day_m.group(1).lower()
+            base = now.date() + timedelta(days=1) if word == "tomorrow" else now.date()
+            t = clock()
+            hour, minute = t if t else (20 if word == "tonight" else 9)
+            return aware(datetime(base.year, base.month, base.day, hour, minute))
+
+        # 3) "Monday at 8:00 AM" / "next Friday 9am" / "this monday".
+        wk = re.search(
+            r"\b(next|this|coming)?\s*?(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b",
+            raw,
+            re.IGNORECASE,
+        )
+        if wk:
+            prefix = (wk.group(1) or "").lower()
+            target = _WEEKDAYS[wk.group(2).lower()]
+            days_ahead = (target - now.weekday()) % 7
+            if prefix == "next":
+                days_ahead = 7 if days_ahead == 0 else days_ahead + 7
+            elif prefix == "" and days_ahead == 0:
+                # "Monday" said on a Monday means the coming one, not today.
+                days_ahead = 7
+            date = now.date() + timedelta(days=days_ahead)
+            t = clock()
+            hour, minute = t if t else (9, 0)
+            return aware(datetime(date.year, date.month, date.day, hour, minute))
+
+    # 4) Last resort: written dates, "10:00 AM" alone, etc.
+    try:
+        return aware(dateutil_parser.parse(raw, fuzzy=True))
+    except (ValueError, TypeError, OverflowError):
+        return None
 
 
 def _uuid(value):
@@ -153,11 +254,33 @@ def _attendee_emails(participants) -> list[str]:
 def create_meeting(db, org_id, user_id, arguments: dict):
     from app.models.meeting import Meeting
 
+    start_time = _parse_meeting_datetime(arguments.get("start_time"))
+    end_time = _parse_meeting_datetime(arguments.get("end_time"))
+
+    now = datetime.now(timezone.utc)
+    if start_time is not None and start_time < now - timedelta(minutes=1):
+        # The model sometimes resolves "Monday at 8 AM" to a date that has
+        # already passed. Reject it so the model retries with a future time
+        # instead of silently scheduling a meeting in the past.
+        return {
+            "error": (
+                "The meeting start time is in the past "
+                f"({start_time.isoformat()}; now is {now.isoformat()}). "
+                "Schedule the meeting for a future time, e.g. the next "
+                "occurrence of that weekday."
+            )
+        }
+
+    if start_time is not None and end_time is None:
+        # The model often supplies only a start time; default to a 1-hour slot
+        # so the meeting can still sync to Google Calendar.
+        end_time = start_time + timedelta(hours=1)
+
     meeting = Meeting(
         organization_id=org_id,
         title=arguments["title"],
-        start_time=arguments.get("start_time"),
-        end_time=arguments.get("end_time"),
+        start_time=start_time,
+        end_time=end_time,
         participants=arguments.get("participants", []),
     )
     db.add(meeting)
@@ -192,6 +315,7 @@ def create_meeting(db, org_id, user_id, arguments: dict):
         result["external_event_id"] = created.get("event_id")
         result["html_link"] = created.get("html_link")
     except Exception as exc:  # noqa: BLE001 - never let Calendar break scheduling
+        db.rollback()  # keep the session usable for the rest of the turn
         logger.warning(
             "google calendar sync skipped for meeting %s: %s (%s)",
             meeting.id,
@@ -446,8 +570,21 @@ TASK_TOOLS: dict[str, ToolSpec] = {
             "type": "object",
             "properties": {
                 "title": {"type": "string"},
-                "start_time": {"type": "string"},
-                "end_time": {"type": "string"},
+                "start_time": {
+                    "type": "string",
+                    "description": (
+                        "ISO 8601 datetime in the FUTURE, e.g. 2026-08-13T10:00:00Z. "
+                        "Natural language like 'Monday at 8:00 AM' (meaning the next "
+                        "upcoming Monday) is also accepted. Never use a date in the past."
+                    ),
+                },
+                "end_time": {
+                    "type": "string",
+                    "description": (
+                        "ISO 8601 datetime, e.g. 2026-08-13T11:00:00Z. "
+                        "Natural language like 'tomorrow at 5 PM' is also accepted."
+                    ),
+                },
                 "participants": {"type": "array", "items": {"type": "string"}},
             },
             "required": ["title"],

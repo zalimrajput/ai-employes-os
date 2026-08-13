@@ -50,6 +50,12 @@ def execute_tool(db, tool_name, org_id, user_id, arguments: dict):
     try:
         return spec.handler(db, org_id, user_id, arguments or {})
     except Exception as exc:  # noqa: BLE001 - agent-facing, must not crash turn
+        # A failed handler may have aborted the session's transaction (e.g. a
+        # bad flush); roll back so the rest of the turn can keep using it.
+        try:
+            db.rollback()
+        except Exception:  # noqa: BLE001 - best effort
+            pass
         return {"error": f"{exc.__class__.__name__}: {exc}"}
 
 

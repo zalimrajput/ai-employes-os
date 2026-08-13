@@ -14,18 +14,8 @@ import type {
 /**
  * Data-access helpers backed by the real Supabase database.
  * Queries use RLS: the signed-in user only sees their organization's rows.
- * When a table is empty (fresh workspace) we return curated demo rows so
- * the UI is always alive, flagged via `source: "demo"`.
+ * When a table is empty we return an empty list and the UI shows empty states.
  */
-
-/**
- * Demo mode is opt-in via NEXT_PUBLIC_ENABLE_DEMO=true (dev/preview only).
- * In production, empty workspaces return empty lists instead of curated fake
- * rows so real customers never see demo data.
- */
-export function isDemoEnabled(): boolean {
-  return process.env.NEXT_PUBLIC_ENABLE_DEMO === "true";
-}
 
 async function getCurrentOrgId(): Promise<string | null> {
   const {
@@ -40,33 +30,26 @@ async function getCurrentOrgId(): Promise<string | null> {
   return (data?.organization_id as string) ?? null;
 }
 
+export type DataResult<T> =
+  | { source: "db"; items: T[] }
+  | { source: "error"; error: string };
+
 // ── AI Employees ──────────────────────────────────────────
-export async function fetchAIEmployees(): Promise<
-  { source: "db" | "demo"; items: AIEmployee[] } | { source: "error"; error: string }
-> {
+export async function fetchAIEmployees(): Promise<DataResult<AIEmployee>> {
   const orgId = await getCurrentOrgId();
   let query = supabase.from("ai_employees").select("*").order("created_at", { ascending: true });
   if (orgId) query = query.eq("organization_id", orgId);
   const { data, error } = await query;
 
   if (error) return { source: "error", error: error.message };
-  if (data && data.length > 0) return { source: "db", items: data as AIEmployee[] };
-
-  return isDemoEnabled()
-    ? { source: "demo", items: DEMO_EMPLOYEES }
-    : { source: "db", items: [] };
+  return { source: "db", items: (data ?? []) as AIEmployee[] };
 }
 
 // ── Tasks ─────────────────────────────────────────────────
-export async function fetchTasks(): Promise<
-  { source: "db" | "demo"; items: Task[] } | { source: "error"; error: string }
-> {
+export async function fetchTasks(): Promise<DataResult<Task>> {
   try {
     const items = await api.fetchTasks();
-    if (items.length > 0) return { source: "db", items };
-    return isDemoEnabled()
-      ? { source: "demo", items: DEMO_TASKS }
-      : { source: "db", items: [] };
+    return { source: "db", items };
   } catch (err) {
     const message = (err as Error).message ?? "";
     // Only fall back to direct Supabase when the backend is unreachable —
@@ -79,16 +62,11 @@ export async function fetchTasks(): Promise<
     if (orgId) query = query.eq("organization_id", orgId);
     const { data, error } = await query;
     if (error) return { source: "error", error: error.message };
-    if (data && data.length > 0) return { source: "db", items: data as Task[] };
-    return isDemoEnabled()
-      ? { source: "demo", items: DEMO_TASKS }
-      : { source: "db", items: [] };
+    return { source: "db", items: (data ?? []) as Task[] };
   }
 }
 
 export async function updateTaskStatus(id: string, status: TaskStatus) {
-  // Demo rows are UI-only; live rows go through the backend PATCH endpoint.
-  if (id.startsWith("demo-")) return { error: null };
   try {
     await api.updateTask(id, { status });
     return { error: null };
@@ -127,40 +105,24 @@ export async function createTask(input: {
 }
 
 // ── Workflows ─────────────────────────────────────────────
-export async function fetchWorkflows(): Promise<
-  { source: "db" | "demo"; items: Workflow[] } | { source: "error"; error: string }
-> {
+export async function fetchWorkflows(): Promise<DataResult<Workflow>> {
   const orgId = await getCurrentOrgId();
   let query = supabase.from("workflows").select("*").order("created_at", { ascending: false });
   if (orgId) query = query.eq("organization_id", orgId);
   const { data, error } = await query;
 
   if (error) return { source: "error", error: error.message };
-  if (data && data.length > 0) return { source: "db", items: data as Workflow[] };
-
-  return isDemoEnabled()
-    ? { source: "demo", items: DEMO_WORKFLOWS }
-    : { source: "db", items: [] };
+  return { source: "db", items: (data ?? []) as Workflow[] };
 }
 
 // ── Conversations & Messages ──────────────────────────────
 // Live chat goes through the backend AI engine (org-scoped, real agent
-// replies). Direct Supabase is only a fallback when the backend is unreachable,
-// and demo rows only appear for pre-seeded `demo-` conversations.
+// replies). Direct Supabase is only a fallback when the backend is unreachable.
 
-function isDemoConversation(id: string) {
-  return id.startsWith("demo-");
-}
-
-export async function fetchConversations(): Promise<
-  { source: "db" | "demo"; items: AIConversation[] } | { source: "error"; error: string }
-> {
+export async function fetchConversations(): Promise<DataResult<AIConversation>> {
   try {
     const items = await api.fetchAIConversations();
-    if (items.length > 0) return { source: "db", items };
-    return isDemoEnabled()
-      ? { source: "demo", items: DEMO_CONVERSATIONS }
-      : { source: "db", items: [] };
+    return { source: "db", items };
   } catch (err) {
     const message = (err as Error).message ?? "";
     // Only fall back to direct Supabase when the backend is unreachable —
@@ -176,20 +138,11 @@ export async function fetchConversations(): Promise<
     if (orgId) query = query.eq("organization_id", orgId);
     const { data, error } = await query;
     if (error) return { source: "error", error: error.message };
-    if (data && data.length > 0) return { source: "db", items: data as AIConversation[] };
-    return isDemoEnabled()
-      ? { source: "demo", items: DEMO_CONVERSATIONS }
-      : { source: "db", items: [] };
+    return { source: "db", items: (data ?? []) as AIConversation[] };
   }
 }
 
-export async function fetchMessages(conversationId: string): Promise<
-  { source: "db" | "demo"; items: AIMessage[] } | { source: "error"; error: string }
-> {
-  // Demo conversations are UI-only — show their curated demo thread.
-  if (isDemoConversation(conversationId) && isDemoEnabled()) {
-    return { source: "demo", items: DEMO_MESSAGES };
-  }
+export async function fetchMessages(conversationId: string): Promise<DataResult<AIMessage>> {
   try {
     const items = await api.fetchAIMessages(conversationId);
     return { source: "db", items };
@@ -234,7 +187,6 @@ export async function createConversation(input: {
   }
 }
 
-
 // ── Org stats for dashboard/analytics ─────────────────────
 export async function fetchOrgStats(): Promise<OrgStats> {
   const [emp, tasks, wf, conv, msgs] = await Promise.all([
@@ -248,11 +200,10 @@ export async function fetchOrgStats(): Promise<OrgStats> {
     })(),
   ]);
 
-  const empItems = emp.source === "demo" ? emp.items : emp.source === "db" ? emp.items : [];
-  const taskItems = tasks.source === "demo" ? tasks.items : tasks.source === "db" ? tasks.items : [];
-  const wfItems = wf.source === "demo" ? wf.items : wf.source === "db" ? wf.items : [];
-  const convItems =
-    conv.source === "demo" ? conv.items : conv.source === "db" ? conv.items : [];
+  const empItems = emp.source === "db" ? emp.items : [];
+  const taskItems = tasks.source === "db" ? tasks.items : [];
+  const wfItems = wf.source === "db" ? wf.items : [];
+  const convItems = conv.source === "db" ? conv.items : [];
 
   return {
     employees: empItems.length,
@@ -260,145 +211,9 @@ export async function fetchOrgStats(): Promise<OrgStats> {
     tasks: taskItems.length,
     workflows: wfItems.length,
     conversations: convItems.length,
-    messages: msgs || (conv.source === "demo" ? DEMO_MESSAGES.length : 0),
+    messages: msgs,
   };
 }
-
-// ── Demo data (fresh workspaces) ──────────────────────────
-export const DEMO_EMPLOYEES: AIEmployee[] = [
-  {
-    id: "demo-emp-1",
-    organization_id: "",
-    name: "Marketing GPT",
-    role: "Marketing Assistant",
-    description: "Creates campaigns, drafts social posts, and tracks brand sentiment.",
-    model: "gpt-5",
-    active: true,
-  },
-  {
-    id: "demo-emp-2",
-    organization_id: "",
-    name: "Sales Assistant",
-    role: "Sales Manager",
-    description: "Qualifies leads, follows up, and drafts quotations automatically.",
-    model: "gpt-5",
-    active: true,
-  },
-  {
-    id: "demo-emp-3",
-    organization_id: "",
-    name: "Support Hero",
-    role: "Customer Support Agent",
-    description: "Resolves tickets, answers FAQs, and escalates with full context.",
-    model: "claude-4",
-    active: true,
-  },
-  {
-    id: "demo-emp-4",
-    organization_id: "",
-    name: "Finance Bot",
-    role: "Finance Assistant",
-    description: "Tracks invoices, chases payments, and forecasts cash flow.",
-    model: "gpt-5",
-    active: false,
-  },
-  {
-    id: "demo-emp-5",
-    organization_id: "",
-    name: "HR Helper",
-    role: "HR Assistant",
-    description: "Drafts offers, schedules interviews, and answers policy questions.",
-    model: "gpt-5",
-    active: true,
-  },
-  {
-    id: "demo-emp-6",
-    organization_id: "",
-    name: "Executive Assistant",
-    role: "CEO Assistant",
-    description: "Manages calendars, prepares briefings, and summarizes meetings.",
-    model: "gpt-5",
-    active: true,
-  },
-];
-
-export const DEMO_TASKS: Task[] = [
-  { id: "demo-t1", title: "Send quotation to Acme Corp", description: "25 laptops — follow pricing sheet", priority: "high", status: "todo", ai_created: true },
-  { id: "demo-t2", title: "Draft weekly sales report", description: "Summarize pipeline movement", priority: "medium", status: "in_progress", ai_created: true },
-  { id: "demo-t3", title: "Follow up with GlobalTech", description: "No reply in 3 days — nudge email", priority: "urgent", status: "in_progress", ai_created: true },
-  { id: "demo-t4", title: "Summarize Monday standup", description: "Extract action items", priority: "low", status: "review", ai_created: true },
-  { id: "demo-t5", title: "Update CRM pipeline", description: "Move won deals to closed stage", priority: "medium", status: "done", ai_created: true },
-  { id: "demo-t6", title: "Prepare invoice for invoice #1042", description: "Attach line items from quotation", priority: "high", status: "done", ai_created: true },
-];
-
-export const DEMO_WORKFLOWS: Workflow[] = [
-  {
-    id: "demo-w1",
-    name: "Customer pays invoice",
-    trigger: { event: "invoice.paid" },
-    actions: [
-      { type: "generate_receipt" },
-      { type: "update_crm" },
-      { type: "notify_sales" },
-      { type: "send_thank_you_email" },
-      { type: "schedule_follow_up" },
-    ],
-    active: true,
-  },
-  {
-    id: "demo-w2",
-    name: "New lead captured",
-    trigger: { event: "lead.created" },
-    actions: [
-      { type: "classify_lead" },
-      { type: "create_task" },
-      { type: "send_welcome_email" },
-    ],
-    active: true,
-  },
-  {
-    id: "demo-w3",
-    name: "Invoice overdue reminder",
-    trigger: { event: "invoice.overdue" },
-    actions: [{ type: "send_reminder" }, { type: "notify_finance" }],
-    active: false,
-  },
-];
-
-export const DEMO_CONVERSATIONS: AIConversation[] = [
-  {
-    id: "demo-c1",
-    organization_id: "",
-    user_id: "",
-    ai_employee_id: "demo-emp-1",
-    title: "Q3 launch campaign",
-    status: "active",
-  },
-  {
-    id: "demo-c2",
-    organization_id: "",
-    user_id: "",
-    ai_employee_id: "demo-emp-2",
-    title: "Acme Corp quotation",
-    status: "active",
-  },
-];
-
-export const DEMO_MESSAGES: AIMessage[] = [
-  {
-    id: "demo-m1",
-    conversation_id: "demo-c1",
-    role: "user",
-    message: "Draft a launch announcement for our new AI workspace product.",
-  },
-  {
-    id: "demo-m2",
-    conversation_id: "demo-c1",
-    role: "assistant",
-    message:
-      "Here's a draft:\n\n**🚀 Introducing AI Employee OS**\n\nYour business now runs with an AI workforce. Emails, quotations, CRM, reports — handled by specialized AI employees that actually *do* the work.\n\nWant me to post it to LinkedIn and X, and schedule A/B variants?",
-  },
-];
 
 // priority + status presentation helpers
 export const PRIORITY_COLORS: Record<TaskPriority, string> = {

@@ -79,4 +79,3 @@ jobs:
           NEXT_PUBLIC_SUPABASE_URL: https://placeholder.supabase.co
           NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: placeholder
           NEXT_PUBLIC_BACKEND_URL: http://localhost:8000
-          NEXT_PUBLIC_ENABLE_DEMO: "false"

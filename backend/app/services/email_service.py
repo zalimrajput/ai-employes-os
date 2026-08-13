@@ -88,6 +88,14 @@ def send_email(
         )
         result["queued"] = True
     except Exception:
+        # Redis/Celery not running: the Email row is kept (sent_at stays NULL)
+        # so the failed attempt is visible, but the caller must not believe
+        # the email was queued.
         logger.exception("failed to enqueue email task")
+        result["queued"] = False
+        result["error"] = (
+            "Email queue unavailable — the Celery worker is not running. "
+            "Start Redis + the worker to deliver emails."
+        )
 
     return result

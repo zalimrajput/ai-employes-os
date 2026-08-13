@@ -58,5 +58,8 @@ Thumbs.db
 # Generated business documents
 backend/app/generated_documents/
 
+# Local tool binaries downloaded for development (Redis for Windows)
+backend/.tools/
+
 # TypeScript build cache
 frontend/tsconfig.tsbuildinfo
